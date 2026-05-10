@@ -40,7 +40,7 @@ def get_profile(uid):
         return res.data
     except: return None
 
-# --- 数据操作 v7.5 ---
+# --- 数据操作 ---
 def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent):
     supabase = get_supabase()
     try:
@@ -52,42 +52,19 @@ def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent
         }).execute()
     except: pass
 
-def record_challenge(uid, is_success=False):
-    supabase = get_supabase()
-    try:
-        # v7.5 增强：如果列不存在，操作会静默失败而不会导致 app 崩溃
-        p = get_profile(uid)
-        if not p: return
-        new_count = (p.get('challenge_count') or 0) + 1
-        new_success = (p.get('challenge_success_count') or 0) + (1 if is_success else 0)
-        supabase.table("profiles").update({
-            "challenge_count": new_count, "challenge_success_count": new_success
-        }).eq("id", uid).execute()
-    except: pass
-
 def get_leaderboard_data():
     supabase = get_supabase()
     try:
-        # v7.5 鲁棒查询：先尝试连表获取 account_name 和质疑战绩
-        try:
-            res = supabase.table("user_rankings").select("*, profiles(account_name, challenge_count, challenge_success_count)").execute()
-            if res.data:
-                flat = []
-                for r in res.data:
-                    p = r.get('profiles') or {}
-                    r['account_name'] = p.get('account_name', '')
-                    r['challenge_count'] = p.get('challenge_count', 0)
-                    r['challenge_success_count'] = p.get('challenge_success_count', 0)
-                    flat.append(r)
-                return flat
-        except:
-            # 彻底降级：只拿基础排名
-            res = supabase.table("user_rankings").select("*").execute()
-            if res.data:
-                for r in res.data:
-                    r['account_name'] = ""; r['challenge_count'] = 0; r['challenge_success_count'] = 0
-                return res.data
-        return []
+        res = supabase.table("user_rankings").select("*, profiles(account_name, challenge_count, challenge_success_count)").execute()
+        if not res.data: return []
+        flat = []
+        for r in res.data:
+            p = r.get('profiles') or {}
+            r['account_name'] = p.get('account_name', '')
+            r['challenge_count'] = p.get('challenge_count', 0)
+            r['challenge_success_count'] = p.get('challenge_success_count', 0)
+            flat.append(r)
+        return flat
     except: return []
 
 def delete_shared_question_by_id(q_id):
@@ -114,7 +91,7 @@ def share_to_community(q_data, category, uid):
         return True
     except: return False
 
-def get_community_selected(limit=50):
+def get_community_selected(limit=100):
     supabase = get_supabase()
     try:
         res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).limit(limit).execute()
@@ -124,23 +101,26 @@ def get_community_selected(limit=50):
 def get_public_mistakes_with_kills(limit=20):
     supabase = get_supabase()
     try:
-        res = supabase.table("answer_logs").select("question, options, answer, analysis, category").eq("is_correct", False).execute()
-        if not res.data: return []
-        counts = {}; processed = []
-        for r in res.data:
-            q = r['question']
-            if q not in counts: counts[q] = 1; processed.append(r)
-            else: counts[q] += 1
+        # v7.8 核心逻辑：获取所有错误记录
+        res_logs = supabase.table("answer_logs").select("question, options, answer, analysis, category").eq("is_correct", False).execute()
+        if not res_logs.data: return []
+        
+        # 获取所有精选题目的文本，用于过滤源头
+        res_shared = supabase.table("shared_questions").select("question").execute()
+        shared_texts = set([s['question'] for s in res_shared.data])
+        
+        counts = {}; processed = []; seen = set()
+        for r in res_logs.data:
+            q_text = r['question']
+            # 只有源自“精选题库”的错题才上榜
+            if q_text in shared_texts:
+                if q_text not in counts:
+                    counts[q_text] = 1; processed.append(r); seen.add(q_text)
+                else: counts[q_text] += 1
+        
         for p in processed: p['kill_count'] = counts[p['question']]
         return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
     except: return []
-
-def get_random_shared_question():
-    supabase = get_supabase()
-    try:
-        res = supabase.table("shared_questions").select("*").execute()
-        return random.choice(res.data) if res.data else None
-    except: return None
 
 def get_user_all_logs(uid):
     supabase = get_supabase()
