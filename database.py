@@ -39,7 +39,7 @@ def get_profile(uid):
         return res.data
     except: return None
 
-# --- 数据操作 v6.5 ---
+# --- 数据操作 ---
 def log_quiz_result(uid, category, question_text, student_answer, is_correct, time_spent, analysis=""):
     supabase = get_supabase()
     try:
@@ -50,10 +50,10 @@ def log_quiz_result(uid, category, question_text, student_answer, is_correct, ti
     except: pass
 
 def record_challenge(uid, is_success=False):
-    """记录一次质疑行为"""
     supabase = get_supabase()
     try:
         p = get_profile(uid)
+        if not p: return
         new_count = (p.get('challenge_count') or 0) + 1
         new_success = (p.get('challenge_success_count') or 0) + (1 if is_success else 0)
         supabase.table("profiles").update({
@@ -87,17 +87,26 @@ def share_to_community(q_data, category, uid):
 def get_leaderboard_data():
     supabase = get_supabase()
     try:
-        # 联合查询 profiles 获取质疑战绩
-        res = supabase.table("user_rankings").select("*, profiles(challenge_count, challenge_success_count)").execute()
-        if not res.data: return []
-        # 展开嵌套数据
-        flat = []
-        for r in res.data:
-            p = r.get('profiles', {})
-            r['challenge_count'] = p.get('challenge_count', 0)
-            r['challenge_success_count'] = p.get('challenge_success_count', 0)
-            flat.append(r)
-        return flat
+        # 安全查询：先尝试联合查询
+        try:
+            res = supabase.table("user_rankings").select("*, profiles(challenge_count, challenge_success_count)").execute()
+            if res.data:
+                flat = []
+                for r in res.data:
+                    p = r.get('profiles', {}) if r.get('profiles') else {}
+                    r['challenge_count'] = p.get('challenge_count', 0)
+                    r['challenge_success_count'] = p.get('challenge_success_count', 0)
+                    flat.append(r)
+                return flat
+        except:
+            # 降级：只查基础数据
+            res = supabase.table("user_rankings").select("*").execute()
+            if res.data:
+                for r in res.data:
+                    r['challenge_count'] = 0
+                    r['challenge_success_count'] = 0
+                return res.data
+        return []
     except: return []
 
 def get_community_selected(limit=20):
@@ -125,7 +134,8 @@ def get_random_shared_question():
     supabase = get_supabase()
     try:
         res = supabase.table("shared_questions").select("*").execute()
-        return random.choice(res.data) if res.data else None
+        if not res or not res.data: return None
+        return random.choice(res.data)
     except: return None
 
 def get_user_all_logs(uid):
