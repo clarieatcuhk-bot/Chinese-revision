@@ -21,7 +21,27 @@ def extract_json_robustly(text):
     except: return None
 
 def sanitize_question(q):
+    """
+    v3.9.2 终极纠偏：处理 AI 随机生成的各种键名
+    """
     if not isinstance(q, dict): return q
+    
+    # 1. 核心键名纠偏 (处理大小写或缩写)
+    key_map = {
+        "question": ["Question", "question_text", "q", "content"],
+        "answer": ["Answer", "ans", "right_answer"],
+        "analysis": ["Analysis", "解析", "explain", "reason"],
+        "options": ["Options", "opts", "choices"]
+    }
+    
+    for std_key, aliases in key_map.items():
+        if std_key not in q:
+            for alias in aliases:
+                if alias in q:
+                    q[std_key] = q[alias]
+                    break
+    
+    # 2. Options 格式纠偏
     opts = q.get("options", {})
     new_opts = {}
     if isinstance(opts, list):
@@ -30,29 +50,23 @@ def sanitize_question(q):
             if i < 4: new_opts[keys[i]] = val
     elif isinstance(opts, dict):
         for k, v in opts.items(): new_opts[str(k).upper()] = v
+    
     for k in ["A", "B", "C", "D"]:
-        if k not in new_opts: new_opts[k] = "数据缺失"
+        if k not in new_opts: new_opts[k] = "选项加载异常"
+        
     q["options"] = new_opts
     return q
 
 def generate_ai_question(items, mode):
     client = get_ai_client()
     if not client: return {"error": "AI 配置缺失"}
-
-    # --- 鲁棒性修复：处理 items 为 None 的情况 ---
+    
     context = "中考常用词语"
     if items:
-        if isinstance(items, list):
-            context = "; ".join([it.get('word', '') for it in items if isinstance(it, dict)])
-        elif isinstance(items, str):
-            context = items
+        if isinstance(items, list): context = "; ".join([it.get('word', '') for it in items if isinstance(it, dict)])
+        elif isinstance(items, str): context = items
 
-    if mode == "discovery":
-        prompt = f"针对‘{context}’命题。格式：JSON {{question, options:{{A,B,C,D}}, answer, analysis}}。标注用括号。"
-    elif mode == "grammar":
-        prompt = "命制中考病句题。标注用括号。格式：JSON。"
-    else:
-        prompt = f"基于‘{context}’命题。标注用括号。格式：JSON。"
+    prompt = f"针对‘{context}’命制一道中考语文选择题。要求：标注用括号，输出 JSON {{question, options, answer, analysis}}。"
 
     try:
         response = client.chat.completions.create(
@@ -63,7 +77,9 @@ def generate_ai_question(items, mode):
             ],
             temperature=0.7
         )
-        data = extract_json_robustly(response.choices[0].message.content)
-        return sanitize_question(data) if data else {"error": "JSON 提取失败"}
+        raw_data = extract_json_robustly(response.choices[0].message.content)
+        if raw_data:
+            return sanitize_question(raw_data)
+        return {"error": "JSON 提取失败"}
     except Exception as e:
         return {"error": str(e)}

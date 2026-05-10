@@ -97,6 +97,14 @@ def brush_page():
 
     q = st.session_state.current_q
     if q and "error" not in q:
+        # --- 修复：防御性检查核心字段 ---
+        if 'question' not in q:
+            st.warning("⚠️ 题目加载异常（字段缺失），请尝试重新生成。")
+            if st.button("🔄 重新命题"):
+                refresh_q([])
+                st.rerun()
+            return
+            
         q_text = format_display_text(q['question'])
         st.markdown(f"### {q_text}", unsafe_allow_html=True)
         ans = st.radio("你的答案：", ["A", "B", "C", "D"], 
