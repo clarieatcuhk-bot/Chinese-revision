@@ -1,6 +1,7 @@
 from supabase import create_client, Client
 import streamlit as st
 import random
+import re
 
 @st.cache_resource
 def get_supabase() -> Client:
@@ -12,7 +13,6 @@ def get_supabase() -> Client:
         st.error(f"Supabase 连接失败: {e}")
         return None
 
-# --- 认证 ---
 def sign_in(username, password):
     supabase = get_supabase()
     email = f"{username}@navigator.com" if "@" not in username else username
@@ -27,7 +27,7 @@ def sign_up_and_login(username, password, name, class_name):
     try:
         response = supabase.auth.sign_up({"email": email, "password": password})
         if response.user:
-            supabase.table("profiles").insert({"id": response.user.id, "name": name, "class_name": class_name}).execute()
+            supabase.table("profiles").insert({"id": response.user.id, "name": name, "class_name": class_name, "account_name": username.lower()}).execute()
             return response.user, None
         return None, "注册失败"
     except Exception as e: return None, str(e)
@@ -39,82 +39,116 @@ def get_profile(uid):
         return res.data
     except: return None
 
-# --- v9.5 强化型数据记录 ---
 def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent):
     supabase = get_supabase()
     try:
-        # 处理可能缺失的 pinyin_map 或 metadata
-        metadata = q_obj.get('metadata', {})
         supabase.table("answer_logs").insert({
-            "user_id": uid, 
-            "category": category, 
-            "question": q_obj['question'], 
-            "options": q_obj['options'], 
-            "answer": q_obj['answer'], 
-            "analysis": q_obj['analysis'],
-            "is_correct": is_correct, 
-            "time_spent": time_spent,
-            "metadata": metadata
+            "user_id": uid, "category": category, 
+            "question": q_obj.get('question', q_obj.get('question_text', '')), 
+            "options": q_obj.get('options', {}), 
+            "answer": q_obj.get('answer', ''), 
+            "analysis": q_obj.get('analysis', ''),
+            "is_correct": is_correct, "time_spent": time_spent
         }).execute()
     except Exception as e:
-        print(f"Log Error (PGRST204 check): {e}")
-
-def get_user_all_logs(uid):
-    supabase = get_supabase()
-    try:
-        # 使用 order 确保最新优先
-        res = supabase.table("answer_logs").select("*").eq("user_id", uid).order('created_at', desc=True).execute()
-        return res.data if res.data else []
-    except: return []
+        print(f"Log Error: {e}")
 
 def clear_user_mistakes(uid):
     supabase = get_supabase()
     try:
-        # 仅清空错题记录，保留正确记录作为画像参考
         supabase.table("answer_logs").delete().eq("user_id", uid).eq("is_correct", False).execute()
         return True
     except: return False
 
-# --- 排名与广场逻辑保持 ---
+# --- 核心修复：排行榜强制关联 ---
 def get_leaderboard_data():
     supabase = get_supabase()
     try:
+        # 1. 获取基础排名
         res_rank = supabase.table("user_rankings").select("*").execute()
+        # 2. 获取用户数据
         res_prof = supabase.table("profiles").select("*").execute()
+        
         if not res_rank.data: return []
-        pm = {p['id']: p for p in (res_prof.data or [])}
+        
+        prof_map = {p.get('id'): p for p in (res_prof.data or []) if p.get('id')}
+        
         flat = []
         for r in res_rank.data:
             uid = r.get('user_id') or r.get('id')
             if not uid: continue
-            p = pm.get(uid, {})
+            
+            p = prof_map.get(uid, {})
+            # 融合数据，赋予默认值，杜绝空数据报错
             r['account_name'] = p.get('account_name', '')
             r['challenge_count'] = p.get('challenge_count', 0)
             r['challenge_success_count'] = p.get('challenge_success_count', 0)
+            # 考虑到如果 user_rankings 没 name，用 profile 的
+            if not r.get('name') and p.get('name'):
+                r['name'] = p.get('name')
+                
             flat.append(r)
         return flat
-    except: return []
+    except Exception as e:
+        print(f"Leaderboard Error: {e}")
+        return []
 
+def normalize_text(text):
+    if not text: return ""
+    return re.sub(r'\s+', '', str(text).replace("<u>", "").replace("</u>", "").replace("*", ""))
+
+# --- 核心修复：乱码清洗与精准匹配 ---
 def get_public_mistakes_with_kills(limit=20):
     supabase = get_supabase()
     try:
-        res = supabase.table("answer_logs").select("*").eq("is_correct", False).order('created_at', desc=True).limit(500).execute()
-        if not res.data: return []
-        counts = {}; processed = []; seen = set()
-        for r in res.data:
-            q = str(r['question']).strip()
-            if q not in counts: counts[q] = 1; processed.append(r); seen.add(q)
-            else: counts[q] += 1
-        for p in processed: p['kill_count'] = counts[str(p['question']).strip()]
+        # 抓取大量日志以保证新鲜度
+        res_logs = supabase.table("answer_logs").select("*").eq("is_correct", False).order('created_at', desc=True).limit(1500).execute()
+        if not res_logs.data: return []
+        
+        # 抓取当前所有精选题库
+        res_sh = supabase.table("shared_questions").select("*").execute()
+        if not res_sh.data: return []
+        
+        # 建立精选题库字典：{ 标准化纯文本 : 原始题目对象 }
+        sh_map = {normalize_text(s.get('question')): s for s in res_sh.data if s.get('question')}
+        
+        counts = {}
+        processed = []
+        seen = set()
+        
+        for r in res_logs.data:
+            q_raw = r.get('question') or r.get('question_text')
+            # 过滤空题、乱码题 (长度极短的视作垃圾数据)
+            if not q_raw or len(str(q_raw)) < 5: continue
+            
+            q_norm = normalize_text(q_raw)
+            
+            # 强制要求：只有存在于“精选题库”中的错题，才有资格进入全站错题流
+            if q_norm in sh_map:
+                std_q = sh_map[q_norm] # 使用精选题的标准结构
+                std_text = std_q.get('question')
+                
+                if std_text not in counts:
+                    counts[std_text] = 1
+                    processed.append(std_q) # 存入标准的分享题对象
+                    seen.add(std_text)
+                else:
+                    counts[std_text] += 1
+                    
+        for p in processed:
+            p['kill_count'] = counts.get(p.get('question'), 1)
+            
         return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
-    except: return []
+    except Exception as e:
+        print(f"Mistakes Error: {e}")
+        return []
 
 def share_to_community(q_data, category, uid):
     supabase = get_supabase()
     try:
         supabase.table("shared_questions").insert({
-            "category": category, "question": q_data["question"], "options": q_data["options"],
-            "answer": q_data["answer"], "analysis": q_data["analysis"], "user_id": uid, "recommend_count": 1
+            "category": category, "question": q_data.get("question", ""), "options": q_data.get("options", {}),
+            "answer": q_data.get("answer", ""), "analysis": q_data.get("analysis", ""), "user_id": uid, "recommend_count": 1
         }).execute()
         return True
     except: return False
@@ -123,6 +157,15 @@ def get_community_selected(limit=100):
     supabase = get_supabase()
     try:
         res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).limit(limit).execute()
+        # 过滤乱码
+        valid = [q for q in (res.data or []) if q.get('question') and len(q.get('question')) > 5]
+        return valid
+    except: return []
+
+def get_user_all_logs(uid):
+    supabase = get_supabase()
+    try:
+        res = supabase.table("answer_logs").select("*").eq("user_id", uid).execute()
         return res.data if res.data else []
     except: return []
 
