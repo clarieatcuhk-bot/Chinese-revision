@@ -34,12 +34,15 @@ def ensure_dict(data):
     if isinstance(data, dict): return data
     if isinstance(data, str):
         try: return json.loads(data)
-        except: return {}
+        except:
+            import ast
+            try: return ast.literal_eval(data)
+            except: return {}
     return {}
 
 def format_html(text):
     if not text: return ""
-    return text.replace("<u>", "<span style='text-decoration: underline; color: #2563eb; font-weight: bold;'>").replace("</u>", "</span>")
+    return str(text).replace("<u>", "<span style='text-decoration: underline; color: #2563eb; font-weight: bold;'>").replace("</u>", "</span>")
 
 # --- Session State ---
 if 'user' not in st.session_state: st.session_state.user = None
@@ -118,13 +121,15 @@ def render_selected_questions():
             st.divider()
 
 def render_mistake_stream():
-    st.markdown("<div class='page-header'><h1>🚩 全站连斩错题流</h1><p>仅抓取精选题库中产生的真实错题</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-header'><h1>🚩 全站连斩错题流</h1><p>全站师生共同攻克的易错难点</p></div>", unsafe_allow_html=True)
     mk = get_public_mistakes_with_kills()
     if not mk: st.success("目前全站没有精选错题。去精选题库试试身手吧！")
     for m in mk:
-        st.error(f"<span class='kill-badge'>⚔️ 连斩 {m.get('kill_count', 1)} 人</span> {format_html(m.get('question'))}", icon="🔥")
+        # 核心修复：使用 unsafe_allow_html 渲染 HTML 标签，替代不支持的 st.error
+        st.markdown(f"<div class='mistake-card'><span class='kill-badge'>⚔️ 连斩 {m.get('kill_count', 1)} 人</span> {format_html(m.get('question'))}</div>", unsafe_allow_html=True)
         if st.button("终结此题", key=f"mk_v10_{m.get('id', random.random())}"):
             st.session_state.challenge_q = m; st.rerun()
+        st.write("") # 增加间距
 
 def render_leaderboard(current_user_is_admin):
     st.markdown("<div class='page-header'><h1>🏆 七维荣耀金榜</h1><p>全面回归的7项竞技数据</p></div>", unsafe_allow_html=True)
@@ -228,6 +233,10 @@ def render_admin_lab():
         st.write(q['question'])
         if st.button("🚀 发布到全站"): share_to_community(q, q['category'], st.session_state.user.id); st.toast("发布成功")
 
+def get_option_label(opts, key):
+    val = opts.get(key) or opts.get(key.lower())
+    return f"{key}. {val}" if val else key
+
 def render_challenge_mode():
     q = st.session_state.challenge_q
     st.markdown("<div class='page-header'><h1>🎯 挑战正在进行</h1></div>", unsafe_allow_html=True)
@@ -235,8 +244,12 @@ def render_challenge_mode():
     q_text = q.get('question') or q.get('question_text') or "数据异常"
     opts = ensure_dict(q.get('options', {}))
     
-    st.info(f"### {format_html(q_text)}")
-    ans = st.radio("请选择答案：", ["A", "B", "C", "D"], format_func=lambda x: f"{x}. {opts.get(x, '...')}", key="act_v10", index=None)
+    # 核心修复：使用 markdown 渲染 HTML，替代不支持 HTML 的 st.info
+    st.markdown(f"<div style='background-color:#eff6ff; padding: 15px; border-radius: 8px; border-left: 5px solid #3b82f6;'><h3>{format_html(q_text)}</h3></div>", unsafe_allow_html=True)
+    st.write("")
+    
+    # 核心修复：适配 AI 把选项生成到题干里的情况
+    ans = st.radio("请选择答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key="act_v10", index=None)
     
     c1, c2 = st.columns(2)
     if ans and c1.button("确认提交"):
@@ -255,8 +268,10 @@ def render_redo_mode():
     q_text = q.get('question') or q.get('question_text') or "数据异常"
     opts = ensure_dict(q.get('options', {}))
     
-    st.warning(f"### {format_html(q_text)}")
-    ans = st.radio("重选答案：", ["A", "B", "C", "D"], format_func=lambda x: f"{x}. {opts.get(x, '...')}", key="redo_v10", index=None)
+    st.markdown(f"<div style='background-color:#fffbeb; padding: 15px; border-radius: 8px; border-left: 5px solid #f59e0b;'><h3>{format_html(q_text)}</h3></div>", unsafe_allow_html=True)
+    st.write("")
+    
+    ans = st.radio("重选答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key="redo_v10", index=None)
     
     c1, c2 = st.columns(2)
     if ans and c1.button("确认提交"):
