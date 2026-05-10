@@ -57,36 +57,34 @@ def generate_ai_question(items, mode, target_hint=None):
         if isinstance(items, list): context = "; ".join([it.get('word', '') for it in items if isinstance(it, dict)])
         else: context = str(items)
 
-    # --- v5.1 保守命题补丁 (严禁玄学) ---
+    # --- v5.5 规范化命题 (最恰当的一项) ---
     prompt = f"""
-    你现在是中考命题委员会的资深研究员，针对【{context}】命制一道选择题。
+    针对【{context}】命制一道选择题。考查类型：{target_hint or '全随机'}。
     
-    ⚠️ 核心禁令 (核心错误准则)：
-    1. 【严禁玄学】：错误选项必须有“硬伤”（如：主谓搭配不当、成分残缺、褒贬误用、逻辑截然相反等）。
-    2. 【严禁主观】：严禁以“语气生硬”、“表达不地道”等模糊理由作为错误标准。错误项必须能用一句话说清它违反了哪条语法或逻辑规则。
-    3. 【保守风格】：题目风格应效仿人教版正式考试题，正确项必须无可挑剔。
+    ⚠️ 核心规范：
+    1. 题干必须包含“最恰当的一项”字样。
+    2. 干扰项必须有硬伤，正确项无可挑剔。
+    3. 标注用括号。
     
-    输出格式：JSON {{question, options, answer, analysis, category}}。标注用（ ）。
+    输出格式：JSON {{question, options, answer, analysis, category}}。
     """
 
     try:
-        # 尝试 V4
         response = client.chat.completions.create(
             model="deepseek-v4",
             messages=[
-                {"role": "system", "content": "你是一个极其保守、严谨的中考专家，只输出 JSON。"},
+                {"role": "system", "content": "你是一个极度规范的中考专家，只输出 JSON。"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3 # 进一步降低随机性
+            temperature=0.3
         )
         raw = extract_json_robustly(response.choices[0].message.content)
         return sanitize_question(raw, default_cat=target_hint or "综合")
     except:
-        # 回退到稳定版
         try:
             response = client.chat.completions.create(
                 model="deepseek-chat",
-                messages=[{"role": "system", "content": "严禁玄学，只输出 JSON"}, {"role": "user", "content": prompt}],
+                messages=[{"role": "system", "content": "只输出 JSON"}, {"role": "user", "content": prompt}],
                 temperature=0.3
             )
             raw = extract_json_robustly(response.choices[0].message.content)
