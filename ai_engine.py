@@ -74,14 +74,37 @@ def generate_ai_question(items, mode, target_hint=None):
     except Exception as e:
         return {"error": str(e)}
 
-def re_verify_question(q):
+def evaluate_challenge(q, reason):
     client = get_ai_client()
-    if not client: return "AI 暂不可用"
+    if not client: return False, "AI 服务未配置"
+    
+    prompt = f"""
+    你是一位资深的中考语文教研员。有一位学生对以下题目发起了严厉的质疑。
+    【原题干】：{q.get('question')}
+    【官方答案】：{q.get('answer')}
+    【官方解析】：{q.get('analysis')}
+    【学生的质疑理由】：{reason}
+    
+    请你作为最高判官，重新审视这道题。
+    你的任务：
+    1. 客观评判学生的质疑是否合理。
+    2. 如果学生的质疑一针见血（题目确实有错、超纲、或者存在歧义），请判定成功 (success: true)。
+    3. 如果题目本身是完美的，是学生知识点掌握不牢固导致理解偏差，请驳回质疑 (success: false)。
+    4. 给出具有指导意义的回复 (reply)。
+    
+    输出必须是严格的 JSON 格式：
+    {{"success": true/false, "reply": "你的判决回复内容..."}}
+    """
+    
     try:
         response = client.chat.completions.create(
             model="deepseek-v4-pro",
-            messages=[{"role": "system", "content": "你是纠错专家。"}, {"role": "user", "content": f"复核此题：{q['question']}"}],
+            messages=[{"role": "system", "content": "你是公正严明的中考语文教研专家判官。输出必须是JSON。"}, {"role": "user", "content": prompt}],
             temperature=0.2
         )
-        return response.choices[0].message.content
-    except: return "质疑失败"
+        raw = extract_json_robustly(response.choices[0].message.content)
+        if raw and 'success' in raw and 'reply' in raw:
+            return bool(raw['success']), str(raw['reply'])
+        return False, "AI 判官给出了一堆乱码，驳回质疑。"
+    except Exception as e:
+        return False, f"调用异常，驳回：{str(e)}"
