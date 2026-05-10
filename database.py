@@ -52,6 +52,16 @@ def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent
         }).execute()
     except: pass
 
+def record_challenge(uid, is_success=False):
+    supabase = get_supabase()
+    try:
+        p = get_profile(uid)
+        if not p: return
+        nc = (p.get('challenge_count') or 0) + 1
+        ns = (p.get('challenge_success_count') or 0) + (1 if is_success else 0)
+        supabase.table("profiles").update({"challenge_count": nc, "challenge_success_count": ns}).eq("id", uid).execute()
+    except: pass
+
 def get_leaderboard_data():
     supabase = get_supabase()
     try:
@@ -67,6 +77,16 @@ def get_leaderboard_data():
         return flat
     except: return []
 
+def share_to_community(q_data, category, uid):
+    supabase = get_supabase()
+    try:
+        supabase.table("shared_questions").insert({
+            "category": category, "question": q_data["question"], "options": q_data["options"],
+            "answer": q_data["answer"], "analysis": q_data["analysis"], "user_id": uid, "recommend_count": 1
+        }).execute()
+        return True
+    except: return False
+
 def get_community_selected(limit=100):
     supabase = get_supabase()
     try:
@@ -79,19 +99,14 @@ def get_public_mistakes_with_kills(limit=20):
     try:
         res_logs = supabase.table("answer_logs").select("question, options, answer, analysis, category").eq("is_correct", False).execute()
         if not res_logs.data: return []
-        
-        res_shared = supabase.table("shared_questions").select("question").execute()
-        # v8.0 增强型匹配：去除空格和换行符，确保只要内容一致就能自动上线
-        shared_texts = set([str(s['question']).strip() for s in res_shared.data])
-        
-        counts = {}; processed = []; seen = set()
+        res_sh = supabase.table("shared_questions").select("question").execute()
+        sh_texts = set([str(s['question']).strip() for s in res_sh.data])
+        counts = {}; processed = []
         for r in res_logs.data:
-            q_text = str(r['question']).strip()
-            if q_text in shared_texts:
-                if q_text not in counts:
-                    counts[q_text] = 1; processed.append(r); seen.add(q_text)
-                else: counts[q_text] += 1
-        
+            q = str(r['question']).strip()
+            if q in sh_texts:
+                if q not in counts: counts[q] = 1; processed.append(r)
+                else: counts[q] += 1
         for p in processed: p['kill_count'] = counts[str(p['question']).strip()]
         return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
     except: return []
@@ -102,6 +117,13 @@ def get_user_all_logs(uid):
         res = supabase.table("answer_logs").select("*").eq("user_id", uid).execute()
         return res.data if res.data else []
     except: return []
+
+def get_random_shared_question():
+    supabase = get_supabase()
+    try:
+        res = supabase.table("shared_questions").select("*").execute()
+        return random.choice(res.data) if res.data else None
+    except: return None
 
 def delete_shared_question_by_id(q_id):
     supabase = get_supabase()
