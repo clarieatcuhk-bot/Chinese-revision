@@ -98,23 +98,22 @@ def normalize_text(text):
     return re.sub(r'\s+', '', str(text).replace("<u>", "").replace("</u>", "").replace("*", ""))
 
 # --- 核心修复：乱码清洗与精准匹配 ---
-def get_public_mistakes_with_kills(limit=20):
+def get_public_mistakes_with_kills(limit=100):
     supabase = get_supabase()
     try:
         # 抓取大量日志以保证新鲜度
-        res_logs = supabase.table("answer_logs").select("*").eq("is_correct", False).order('created_at', desc=True).limit(1500).execute()
+        res_logs = supabase.table("answer_logs").select("*").eq("is_correct", False).order('created_at', desc=True).limit(2000).execute()
         if not res_logs.data: return []
         
         # 抓取当前所有精选题库
         res_sh = supabase.table("shared_questions").select("*").execute()
         if not res_sh.data: return []
         
-        # 建立精选题库字典：{ 标准化纯文本 : 原始题目对象 }
-        sh_map = {normalize_text(s.get('question')): s for s in res_sh.data if s.get('question')}
+        # 建立精选题库字典：使用 dict(s) 防止内存引用污染
+        sh_map = {normalize_text(s.get('question')): dict(s) for s in res_sh.data if s.get('question')}
         
         counts = {}
-        processed = []
-        seen = set()
+        processed_map = {}
         
         for r in res_logs.data:
             q_raw = r.get('question') or r.get('question_text')
@@ -125,20 +124,21 @@ def get_public_mistakes_with_kills(limit=20):
             
             # 强制要求：只有存在于“精选题库”中的错题，才有资格进入全站错题流
             if q_norm in sh_map:
-                std_q = sh_map[q_norm] # 使用精选题的标准结构
-                std_text = std_q.get('question')
+                std_text = sh_map[q_norm].get('question')
                 
                 if std_text not in counts:
                     counts[std_text] = 1
-                    processed.append(std_q) # 存入标准的分享题对象
-                    seen.add(std_text)
+                    processed_map[std_text] = sh_map[q_norm]
                 else:
                     counts[std_text] += 1
                     
-        for p in processed:
-            p['kill_count'] = counts.get(p.get('question'), 1)
+        final_list = []
+        for std_text, q_obj in processed_map.items():
+            q_obj['kill_count'] = counts[std_text]
+            final_list.append(q_obj)
             
-        return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
+        # 扩大容量，防止新的连斩为1的错题被挤出排行榜
+        return sorted(final_list, key=lambda x: x['kill_count'], reverse=True)[:limit]
     except Exception as e:
         print(f"Mistakes Error: {e}")
         return []
