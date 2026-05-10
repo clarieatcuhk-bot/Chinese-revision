@@ -11,12 +11,12 @@ from database import (
     sign_in, sign_up_and_login, get_profile, log_quiz_result, 
     get_user_all_logs, share_to_community, get_community_selected, 
     get_public_mistakes_with_kills, get_leaderboard_data, 
-    clear_user_mistakes
+    clear_user_mistakes, delete_all_logs_of_question, delete_shared_question
 )
 from ai_engine import generate_ai_question
 
-# --- v10.0 终极纯净版 ---
-st.set_page_config(page_title="Zhongkao-Navigator Pro v10.0", page_icon="💎", layout="wide")
+# --- v10.5 净化守卫版 ---
+st.set_page_config(page_title="Zhongkao-Navigator Pro v10.5", page_icon="💎", layout="wide")
 
 # --- UI 样式 ---
 st.markdown("""
@@ -26,10 +26,10 @@ st.markdown("""
     .kill-badge { background: #ef4444; color: white; padding: 3px 12px; border-radius: 15px; font-weight: bold; font-size: 0.9rem; margin-right: 10px; }
     .gold-medal { color: #eab308; font-weight: bold; }
     .admin-badge { background: #dc2626; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
+    .mistake-card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e2e8f0; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 辅助工具 ---
 def ensure_dict(data):
     if isinstance(data, dict): return data
     if isinstance(data, str):
@@ -56,7 +56,7 @@ def main():
 def show_auth():
     c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
-        st.markdown("<h2 style='text-align:center;'>💎 语文导航 Pro v10.0</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>💎 语文导航 Pro v10.5</h2>", unsafe_allow_html=True)
         t = st.tabs(["🔑 登录", "📝 注册"])
         with t[0]:
             u = st.text_input("账号 ID")
@@ -87,49 +87,63 @@ def app_shell():
         menu = ["🌟 精选题库", "🚩 错题挑战", "🏆 荣耀金榜", "📊 个人画像"]
         if is_admin: menu.insert(0, "📖 命题实验室")
         
-        # 核心修复：丝滑导航 (无 rerun)
+        # 丝滑导航 (无 rerun)
         if st.session_state.challenge_q or st.session_state.redo_q:
             st.info("🎯 答题模式进行中")
             if st.button("⬅️ 强制退出"):
                 st.session_state.challenge_q = None; st.session_state.redo_q = None; st.rerun()
-            active_tab = None # 屏蔽主内容渲染
+            active_tab = None 
         else:
             active_tab = st.radio("系统频道", menu, key="nav_radio")
             
         st.divider()
         if st.button("退出系统"): st.session_state.user = None; st.rerun()
 
-    # 逻辑路由
     if st.session_state.challenge_q: render_challenge_mode()
     elif st.session_state.redo_q: render_redo_mode()
     else:
-        if active_tab == "🌟 精选题库": render_selected_questions()
-        elif active_tab == "🚩 错题挑战": render_mistake_stream()
+        if active_tab == "🌟 精选题库": render_selected_questions(is_admin)
+        elif active_tab == "🚩 错题挑战": render_mistake_stream(is_admin)
         elif active_tab == "🏆 荣耀金榜": render_leaderboard(is_admin)
         elif active_tab == "📊 个人画像": render_personal_dashboard()
         elif active_tab == "📖 命题实验室": render_admin_lab()
 
-def render_selected_questions():
+def render_selected_questions(is_admin):
     st.markdown("<div class='page-header'><h1>🌟 老师精选题库</h1><p>已过滤无效数据的纯净版题库</p></div>", unsafe_allow_html=True)
     qs = get_community_selected()
     if not qs: st.info("目前没有精选题目")
     for q in qs:
         with st.container():
             st.markdown(f"### 【{q.get('category', '综合')}】 {format_html(q.get('question'))}", unsafe_allow_html=True)
-            if st.button("立即挑战", key=f"sel_v10_{q['id']}"):
+            
+            c1, c2 = st.columns([1, 4])
+            if c1.button("立即挑战", key=f"sel_v10_{q['id']}"):
                 st.session_state.challenge_q = q; st.rerun()
+                
+            if is_admin:
+                if c2.button("🗑️ 强力清除", key=f"del_sel_{q['id']}"):
+                    delete_shared_question(q['id'])
+                    st.toast("✅ 已从精选题库永久删除")
+                    time.sleep(0.5); st.rerun()
             st.divider()
 
-def render_mistake_stream():
+def render_mistake_stream(is_admin):
     st.markdown("<div class='page-header'><h1>🚩 全站连斩错题流</h1><p>全站师生共同攻克的易错难点</p></div>", unsafe_allow_html=True)
     mk = get_public_mistakes_with_kills()
     if not mk: st.success("目前全站没有精选错题。去精选题库试试身手吧！")
     for m in mk:
-        # 核心修复：使用 unsafe_allow_html 渲染 HTML 标签，替代不支持的 st.error
         st.markdown(f"<div class='mistake-card'><span class='kill-badge'>⚔️ 连斩 {m.get('kill_count', 1)} 人</span> {format_html(m.get('question'))}</div>", unsafe_allow_html=True)
-        if st.button("终结此题", key=f"mk_v10_{m.get('id', random.random())}"):
+        
+        c1, c2 = st.columns([1, 4])
+        if c1.button("终结此题", key=f"mk_v10_{m.get('id', random.random())}"):
             st.session_state.challenge_q = m; st.rerun()
-        st.write("") # 增加间距
+            
+        if is_admin:
+            if c2.button("🗑️ 拔除错题", key=f"del_mk_{m.get('id', random.random())}"):
+                delete_all_logs_of_question(m.get('question'))
+                st.toast("✅ 该错题已从全站记录中抹除")
+                time.sleep(0.5); st.rerun()
+        st.write("") 
 
 def render_leaderboard(current_user_is_admin):
     st.markdown("<div class='page-header'><h1>🏆 七维荣耀金榜</h1><p>全面回归的7项竞技数据</p></div>", unsafe_allow_html=True)
@@ -137,7 +151,6 @@ def render_leaderboard(current_user_is_admin):
     if not data: st.info("榜单数据加载中..."); return
     df = pd.DataFrame(data)
     
-    # 核心修复：绝对的管理员屏蔽
     def is_adm(row):
         a = str(row.get('account_name', '')).lower()
         n = str(row.get('name', '')).lower()
@@ -147,7 +160,6 @@ def render_leaderboard(current_user_is_admin):
         
     df_st = df[~df.apply(is_adm, axis=1)] if not df.empty else df
     
-    # 强制渲染 7 个版块
     c1, c2, c3 = st.columns(3)
     with c1:
         st.subheader("🔥 刷题榜")
@@ -191,7 +203,6 @@ def render_personal_dashboard():
     c1, c2 = st.columns([2, 1])
     with c1:
         st.subheader("⏱️ 状态波动图")
-        # 核心修复：清洗失效的时间戳
         if not df.empty:
             df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
             df_clean = df.dropna(subset=['created_at']).copy()
@@ -218,7 +229,7 @@ def render_personal_dashboard():
             for cat in latest['category'].unique():
                 with st.expander(f"📌 {cat}"):
                     for _, m in latest[latest['category']==cat].iterrows():
-                        st.markdown(f"**题干：** {format_html(m.get('question'))}", unsafe_allow_html=True)
+                        st.markdown(f"<div class='mistake-card'><b>题干：</b> {format_html(m.get('question'))}<br><br>❌ 回答：{m.get('student_answer', '无')} | ✅ 答案：{m.get('answer')}</div>", unsafe_allow_html=True)
                         if st.button("🔥 涅槃重练", key=f"redo_v10_{random.random()}"):
                             st.session_state.redo_q = m.to_dict(); st.rerun()
                         st.divider()
@@ -244,11 +255,9 @@ def render_challenge_mode():
     q_text = q.get('question') or q.get('question_text') or "数据异常"
     opts = ensure_dict(q.get('options', {}))
     
-    # 核心修复：使用 markdown 渲染 HTML，替代不支持 HTML 的 st.info
     st.markdown(f"<div style='background-color:#eff6ff; padding: 15px; border-radius: 8px; border-left: 5px solid #3b82f6;'><h3>{format_html(q_text)}</h3></div>", unsafe_allow_html=True)
     st.write("")
     
-    # 核心修复：适配 AI 把选项生成到题干里的情况
     ans = st.radio("请选择答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key="act_v10", index=None)
     
     c1, c2 = st.columns(2)

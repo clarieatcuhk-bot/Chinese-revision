@@ -191,3 +191,10 @@ def delete_all_logs_of_question(q_text):
         supabase.table("answer_logs").delete().eq("question", q_text).execute()
         return True
     except: return False
+
+def delete_shared_question(q_id):
+    supabase = get_supabase()
+    try:
+        supabase.table("shared_questions").delete().eq("id", q_id).execute()
+        return True
+    except: return False
