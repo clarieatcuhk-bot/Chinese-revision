@@ -57,29 +57,39 @@ def generate_ai_question(items, mode, target_hint=None):
         if isinstance(items, list): context = "; ".join([it.get('word', '') for it in items if isinstance(it, dict)])
         else: context = str(items)
 
-    # --- v4.8 严谨版 Prompt (知识锁定) ---
+    # --- v5.0 DeepSeek V4 适配与严谨 Prompt ---
     prompt = f"""
-    你现在是中考命题专家组组长，针对【{context}】命制一道选择题。
-    
-    ⚠️ 质量红线：
-    1. 真实性：禁止虚构不存在的语法错误（如“怨怅不已”是正确词汇，禁止误判为病句）。
-    2. 严谨性：病句题必须严格符合“成分残缺、搭配不当、语序不当、结构混乱、不合逻辑、修辞不当”六大类型。
-    3. 唯一性：干扰项必须有明确错误，正确项必须无可争议。
-    
+    你现在是 DeepSeek V4 支持下的中考专家组，针对【{context}】命制一道选择题。
     考查类型需求：{target_hint or '全随机'}
-    要求输出 JSON {{question, options, answer, analysis, category}}。标注用括号。
+    
+    ⚠️ 命题准则：
+    1. 真实性：严禁发明错误的语法。
+    2. 严谨性：答案唯一，解析透彻。
+    3. 标注：考查字词用（ ）包裹。
+    
+    输出格式：JSON {{question, options, answer, analysis, category}}。
     """
 
     try:
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="deepseek-v4", # 适配 V4 模型
             messages=[
-                {"role": "system", "content": "你是一个极其严谨的中考专家，只输出 JSON。"},
+                {"role": "system", "content": "你是一个只输出 JSON 的 V4 教育专家。"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.5 # 降低温度提高稳定性
+            temperature=0.5
         )
         raw = extract_json_robustly(response.choices[0].message.content)
         return sanitize_question(raw, default_cat=target_hint or "综合")
     except Exception as e:
-        return {"error": str(e)}
+        # 降级处理：如果 V4 模型不存在，切换到 deepseek-chat
+        try:
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[{"role": "system", "content": "只输出 JSON"}, {"role": "user", "content": prompt}],
+                temperature=0.5
+            )
+            raw = extract_json_robustly(response.choices[0].message.content)
+            return sanitize_question(raw, default_cat=target_hint or "综合")
+        except:
+            return {"error": str(e)}
