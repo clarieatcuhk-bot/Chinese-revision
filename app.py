@@ -238,11 +238,32 @@ def render_personal_dashboard():
 def render_admin_lab():
     st.markdown("<div class='page-header'><h1>📖 命题实验室</h1><p>高质量出题机</p></div>", unsafe_allow_html=True)
     if st.button("✨ 生成字音精选题"):
-        st.session_state.lab_q = generate_ai_question(None, "precise", "字音辨析")
+        with st.spinner("🧠 深层AI 命题网络运行中..."):
+            st.session_state.lab_q = generate_ai_question(None, "precise", "字音辨析")
+            
     if 'lab_q' in st.session_state and st.session_state.lab_q:
         q = st.session_state.lab_q
-        st.write(q['question'])
-        if st.button("🚀 发布到全站"): share_to_community(q, q['category'], st.session_state.user.id); st.toast("发布成功")
+        q_text = q.get('question', '')
+        opts = ensure_dict(q.get('options', {}))
+        
+        st.markdown(f"<div style='background-color:#f0fdf4; padding: 15px; border-radius: 8px; border-left: 5px solid #22c55e; margin-bottom: 15px;'><h3>{format_html(q_text)}</h3></div>", unsafe_allow_html=True)
+        
+        # 完美展示独立选项
+        for k in ["A", "B", "C", "D"]:
+            v = opts.get(k) or opts.get(k.lower())
+            if v:
+                st.write(f"**{k}.** {v}")
+                
+        with st.expander("👀 查看答案与解析"):
+            st.success(f"正确答案：{q.get('answer')}")
+            st.info(f"解析：{q.get('analysis')}")
+            
+        if st.button("🚀 确认无误，发布到全站"): 
+            share_to_community(q, q.get('category', '字音辨析'), st.session_state.user.id)
+            st.toast("✅ 题目已发布到全站精选题库！")
+            time.sleep(1)
+            st.session_state.lab_q = None
+            st.rerun()
 
 def get_option_label(opts, key):
     val = opts.get(key) or opts.get(key.lower())
