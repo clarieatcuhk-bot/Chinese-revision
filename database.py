@@ -13,7 +13,7 @@ def get_supabase() -> Client:
         st.error(f"Supabase 连接失败: {e}")
         return None
 
-# --- 认证逻辑保持不变 ---
+# --- 认证 ---
 def sign_in(username, password):
     supabase = get_supabase()
     email = f"{username}@navigator.com" if "@" not in username else username
@@ -53,73 +53,65 @@ def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent
         }).execute()
     except: pass
 
-# --- 核心修复：更强大的错题嗅探引擎 ---
 def clean_q_text(text):
-    """深度清洗题目文本，去除所有干扰匹配的符号"""
     if not text: return ""
-    # 去除 Markdown 加粗、下划线、空格、换行
     t = str(text).replace("**", "").replace("__", "").replace("<u>", "").replace("</u>", "")
     return re.sub(r'\s+', '', t)
+
+# --- v8.2 超强韧性查询 ---
+def get_leaderboard_data():
+    supabase = get_supabase()
+    try:
+        # 尝试最完美的连表查询
+        try:
+            res = supabase.table("user_rankings").select("*, profiles(account_name, challenge_count, challenge_success_count)").execute()
+            if res.data:
+                flat = []
+                for r in res.data:
+                    p = r.get('profiles') or {}
+                    r['account_name'] = p.get('account_name', '')
+                    r['challenge_count'] = p.get('challenge_count', 0)
+                    r['challenge_success_count'] = p.get('challenge_success_count', 0)
+                    flat.append(r)
+                return flat
+        except:
+            # 降级：如果 profiles 缺列，仅拿基础排名
+            res = supabase.table("user_rankings").select("*").execute()
+            if res.data:
+                for r in res.data: r['account_name'] = ""; r['challenge_count'] = 0; r['challenge_success_count'] = 0
+                return res.data
+        return []
+    except: return []
 
 def get_public_mistakes_with_kills(limit=20):
     supabase = get_supabase()
     try:
-        # v8.1 修复 1：按时间倒序排列，并扩大抓取范围到 2000 条记录
-        res_logs = supabase.table("answer_logs")\
-            .select("question, options, answer, analysis, category, created_at")\
-            .eq("is_correct", False)\
-            .order('created_at', desc=True)\
-            .limit(2000)\
-            .execute()
-            
+        # 1. 拿最新错误日志
+        res_logs = supabase.table("answer_logs").select("*").eq("is_correct", False).order('created_at', desc=True).limit(1000).execute()
         if not res_logs.data: return []
         
-        # 获取精选题库，同步进行深度清洗
+        # 2. 拿精选题库
         res_sh = supabase.table("shared_questions").select("question").execute()
         shared_clean_map = {clean_q_text(s['question']): s['question'] for s in res_sh.data}
         
-        counts = {}; processed = []; seen_clean = set()
-        
+        counts = {}; processed = []; seen_std = set()
         for r in res_logs.data:
-            raw_text = r['question']
-            clean_text = clean_q_text(raw_text)
-            
-            # 如果这道错题的“纯文字骨架”存在于精选题库中
-            if clean_text in shared_clean_map:
-                std_text = shared_clean_map[clean_text] # 使用精选题库里的标准文本展示
-                if std_text not in seen_clean:
-                    counts[std_text] = 1
-                    # 修正显示用的题目为标准精选文本
+            c_text = clean_q_text(r['question'])
+            if c_text in shared_clean_map:
+                std_text = shared_clean_map[c_text]
+                if std_text not in seen_std:
                     r['question'] = std_text
                     processed.append(r)
-                    seen_clean.add(std_text)
+                    seen_std.add(std_text)
+                    counts[std_text] = 1
                 else:
                     counts[std_text] += 1
         
-        for p in processed:
-            p['kill_count'] = counts.get(p['question'], 1)
-            
+        for p in processed: p['kill_count'] = counts.get(p['question'], 1)
         return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
-    except Exception as e:
-        print(f"Mistake Sync Error: {e}")
-        return []
-
-# --- 其他函数保持稳定 ---
-def get_leaderboard_data():
-    supabase = get_supabase()
-    try:
-        res = supabase.table("user_rankings").select("*, profiles(account_name, challenge_count, challenge_success_count)").execute()
-        if not res.data: return []
-        flat = []
-        for r in res.data:
-            p = r.get('profiles') or {}
-            r['account_name'] = p.get('account_name', '')
-            r['challenge_count'] = p.get('challenge_count', 0)
-            r['challenge_success_count'] = p.get('challenge_success_count', 0)
-            flat.append(r)
-        return flat
     except: return []
 
+# --- 保持其他接口稳定 ---
 def share_to_community(q_data, category, uid):
     supabase = get_supabase()
     try:
