@@ -10,21 +10,21 @@ from datetime import datetime
 from database import (
     sign_in, sign_up_and_login, get_profile, log_quiz_result, 
     get_user_all_logs, share_to_community, get_community_selected, 
-    get_public_mistakes, get_random_shared_question, get_leaderboard_data
+    get_public_mistakes_with_kills, get_random_shared_question, get_leaderboard_data
 )
 from ai_engine import generate_ai_question, sanitize_question
 
-# --- v4.5 荣耀金勋章版 ---
-st.set_page_config(page_title="Zhongkao-Navigator Pro v4.5", page_icon="🏆", layout="wide")
+# --- v4.8 “连斩”与“金牌推荐”版 ---
+st.set_page_config(page_title="Zhongkao-Navigator Hall of Fame v4.8", page_icon="⚔️", layout="wide")
 
-# --- UI 样式 (莫兰迪深色调 + 金色勋章) ---
+# --- 样式设计 ---
 st.markdown("""
 <style>
     .main { background-color: #f8fafc; }
+    .kill-streak { color: #ef4444; font-weight: bold; font-size: 1.1rem; border: 1px solid #fee2e2; padding: 2px 8px; border-radius: 5px; background: #fef2f2; }
+    .recommend-badge { color: #f59e0b; font-weight: bold; border: 1px solid #fef3c7; padding: 2px 8px; border-radius: 5px; background: #fffbeb; }
     .stMetric { background-color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
     .gold-medal { color: #d4af37; font-weight: bold; font-size: 1.2rem; }
-    .standard-name { color: #1e3a8a; }
-    .chart-container { background-color: white; padding: 20px; border-radius: 15px; border: 1px solid #e2e8f0; }
     .badge { background-color: #1e3a8a; color: white; padding: 3px 12px; border-radius: 50px; font-size: 0.85rem; }
 </style>
 """, unsafe_allow_html=True)
@@ -59,20 +59,20 @@ def main():
 def show_auth():
     c1, c2, c3 = st.columns([1, 1, 1])
     with c2:
-        st.markdown("<h2 style='text-align:center;'>🎯 语文冲刺·荣耀版 v4.5</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>🛡️ 语文冲刺 v4.8</h2>", unsafe_allow_html=True)
         t1, t2 = st.tabs(["🔑 登录", "📝 注册"])
         with t1:
             u = st.text_input("用户名", key="l_u")
             p = st.text_input("密码", type="password", key="l_p")
-            if st.button("进入系统", use_container_width=True):
+            if st.button("立即进入", use_container_width=True):
                 res, err = sign_in(u, p)
                 if not err: st.session_state.user = res.user; st.rerun()
         with t2:
-            ru = st.text_input("用户名", key="r_u")
+            ru = st.text_input("设置用户名", key="r_u")
             rp = st.text_input("设置密码", type="password", key="r_p")
             rn = st.text_input("姓名", key="r_n")
             rc = st.text_input("班级", key="r_c")
-            if st.button("立即注册", use_container_width=True):
+            if st.button("完成注册", use_container_width=True):
                 user, err = sign_up_and_login(ru, rp, rn, rc)
                 if not err: st.session_state.user = user; st.rerun()
 
@@ -90,14 +90,14 @@ def app_body():
         st.divider()
         st.markdown("🎯 **锁定考点：**")
         st.session_state.targets = st.multiselect("多选：", ["字音辨析", "成语运用", "病句诊断", "3500字基础", "3500字进阶"], default=st.session_state.targets)
-        if st.button("退出系统"): st.session_state.user = None; st.rerun()
+        if st.button("退出注销"): st.session_state.user = None; st.rerun()
 
     if st.session_state.current_page == "📖 专项训练": brush_page()
     elif st.session_state.current_page == "🏰 社区广场": community_page()
-    else: dashboard_v45_page()
+    else: dashboard_page()
 
 def brush_page():
-    st.header("精准考点挑战")
+    st.header("考点精准挑战")
     c1, c2 = st.columns([5, 1])
     with c2:
         if st.button("✨ 换一题", use_container_width=True) or st.session_state.current_q is None:
@@ -122,9 +122,9 @@ def brush_page():
 
         if st.session_state.answered:
             st.info(f"💡 **解析**：{q['analysis']}")
-            if st.button("👍 觉得不错，分享到广场"):
+            if st.button("👍 值得分享给全站"):
                 share_to_community(q, q.get('category', '综合'), st.session_state.user.id)
-                st.toast("贡献度+1！已同步广场")
+                st.toast("贡献成功！可在排行榜查看。")
             if st.button("继续刷下一题 ➡️"):
                 refresh_q(st.session_state.targets)
                 st.rerun()
@@ -134,7 +134,7 @@ def refresh_q(targets):
     st.session_state.question_id = str(uuid.uuid4())
     st.session_state.start_time = time.time()
     target_focus = random.choice(targets) if targets else None
-    with st.spinner("AI 实验室正在出题..."):
+    with st.spinner("AI 教练正在命题..."):
         if random.random() < 0.2:
             res = get_random_shared_question()
             if res: res["from_community"] = True; st.session_state.current_q = res; return
@@ -147,26 +147,23 @@ def refresh_q(targets):
             res = generate_ai_question(random.sample(pool, 2) if pool else None, "precise", target_focus)
         st.session_state.current_q = res
 
-# --- 🏰 社区广场 & 🏆 金勋章排行榜 ---
 def community_page():
-    st.header("🏰 社区共享广场")
-    t1, t2, t3 = st.tabs(["🏆 荣耀排行榜", "🌟 精选题库", "🚩 全站错题流"])
+    st.header("🏰 社区共享广场 & ⚔️ 荣耀激斗")
+    t1, t2, t3 = st.tabs(["🏆 荣耀排行榜", "🌟 精选题库", "🚩 全站错题·连斩流"])
     
     with t1:
         data = get_leaderboard_data()
         if data:
             df = pd.DataFrame(data)
-            df['accuracy'] = (df['correct_questions'] / df['total_questions'].replace(0, 1) * 100).round(1)
-            
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown("#### 🔥 刷题王者 (总量)")
+                st.markdown("#### 🔥 刷题王者")
                 top_total = df.sort_values('total_questions', ascending=False).head(10)
                 for i, row in top_total.iterrows():
                     name_style = "gold-medal" if i == top_total.index[0] else "standard-name"
                     st.markdown(f"{i+1}. <span class='{name_style}'>{row['name']}</span> - {row['total_questions']} 题", unsafe_allow_html=True)
             with c2:
-                st.markdown("#### 🎯 常胜将军 (正确数)")
+                st.markdown("#### 🎯 常胜将军")
                 top_correct = df.sort_values('correct_questions', ascending=False).head(10)
                 for i, row in top_correct.iterrows():
                     name_style = "gold-medal" if i == top_correct.index[0] else "standard-name"
@@ -175,56 +172,36 @@ def community_page():
     with t2:
         for q in get_community_selected():
             with st.expander(f"【{q['category']}】 {q['question'][:30]}..."):
+                # ⭐ 推荐数展示
+                count = q.get('recommend_count', 1)
+                st.markdown(f"<span class='recommend-badge'>⭐ {count} 人诚心推荐</span>", unsafe_allow_html=True)
                 st.markdown(format_text(q['question']))
                 if st.button("立即挑战", key=f"sq_{q['id']}"):
                     st.session_state.current_q = q
                     st.session_state.current_page = "📖 专项练习"
                     st.rerun()
+
     with t3:
-        for m in get_public_mistakes():
+        for m in get_public_mistakes_with_kills():
             with st.container():
+                # ⚔️ 连斩数展示
+                kills = m.get('kill_count', 1)
+                st.markdown(f"<span class='kill-streak'>⚔️ 已连斩 {kills} 人</span>", unsafe_allow_html=True)
                 st.error(f"**[{m['category']}]** {format_text(m['question'])}")
 
-# --- 📊 深度画像 v4.5 (柱状图+折线图) ---
-def dashboard_v45_page():
-    st.header("📊 深度能力画像 v4.5")
+def dashboard_page():
+    st.header("📊 深度能力画像")
     logs = get_user_all_logs(st.session_state.user.id)
-    if not logs: st.info("尚未收集到数据"); return
-    
-    df = pd.DataFrame(logs)
-    df['created_at'] = pd.to_datetime(df['created_at'])
-    df['date'] = df['created_at'].dt.date
-    
-    row1_c1, row1_c2 = st.columns(2)
-    with row1_c1:
-        # 板块正确率柱状图
-        cat_acc = df.groupby('category')['is_correct'].mean().reset_index()
-        cat_acc['is_correct'] *= 100
-        fig1 = px.bar(cat_acc, x='category', y='is_correct', title="🎯 各板块正确率 (%)", color='is_correct', color_continuous_scale='Blues')
-        st.plotly_chart(fig1, use_container_width=True)
-    with row1_c2:
-        # 板块使用时长柱状图
-        cat_time = df.groupby('category')['time_spent'].sum().reset_index()
-        fig2 = px.bar(cat_time, x='category', y='time_spent', title="⏱️ 各板块总投入时间 (s)", color_discrete_sequence=['#1e3a8a'])
-        st.plotly_chart(fig2, use_container_width=True)
-
-    # 每日正确率趋势折线图
-    daily_acc = df.groupby('date')['is_correct'].mean().reset_index()
-    daily_acc['is_correct'] *= 100
-    fig3 = px.line(daily_acc, x='date', y='is_correct', title="📈 每日正确率波动趋势 (%)", markers=True, line_shape="spline")
-    st.plotly_chart(fig3, use_container_width=True)
-
-    st.divider()
-    # 导出 Markdown
-    if st.button("📥 导出专业版错题诊断手册", use_container_width=True):
-        md = f"# 🛡️ 中考语文个人避雷手册\n生成时间：{datetime.now().strftime('%Y-%m-%d')}\n\n"
-        for cat in df['category'].unique():
-            wrongs = df[(df['category'] == cat) & (~df['is_correct'])]
-            if not wrongs.empty:
-                md += f"## 【{cat}板块】\n"
-                for _, row in wrongs.iterrows():
-                    md += f"### {row['question']}\n- ❌ 你的错误答案: {row['answer']}\n- 💡 深度解析: {row['analysis']}\n\n"
-        st.download_button("点击下载", md, file_name="Zhongkao_Mistakes_Final.md")
+    if logs:
+        df = pd.DataFrame(logs)
+        df['created_at'] = pd.to_datetime(df['created_at'])
+        df['date'] = df['created_at'].dt.date
+        c1, c2 = st.columns(2)
+        with c1:
+            st.plotly_chart(px.bar(df.groupby('category')['is_correct'].mean().reset_index(), x='category', y='is_correct', title="各板块正确率"), use_container_width=True)
+        with c2:
+            st.plotly_chart(px.line(df.groupby('date')['is_correct'].mean().reset_index(), x='date', y='is_correct', title="每日正确率波动"), use_container_width=True)
+    else: st.info("尚未收集到数据")
 
 if __name__ == "__main__":
     main()
