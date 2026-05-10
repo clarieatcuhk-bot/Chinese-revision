@@ -211,3 +211,14 @@ def delete_shared_question(q_id):
         supabase.table("shared_questions").delete().eq("id", q_id).execute()
         return True
     except: return False
+
+def increment_challenge_stats(uid, success=False):
+    supabase = get_supabase()
+    try:
+        res = supabase.table("profiles").select("challenge_count, challenge_success_count").eq("id", uid).execute()
+        if res.data:
+            c = res.data[0].get('challenge_count', 0) + 1
+            cs = res.data[0].get('challenge_success_count', 0) + (1 if success else 0)
+            supabase.table("profiles").update({"challenge_count": c, "challenge_success_count": cs}).eq("id", uid).execute()
+    except Exception as e:
+        print(f"Challenge update error: {e}")

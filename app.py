@@ -11,12 +11,13 @@ from database import (
     sign_in, sign_up_and_login, get_profile, log_quiz_result, 
     get_user_all_logs, share_to_community, get_community_selected, 
     get_public_mistakes_with_kills, get_leaderboard_data, 
-    clear_user_mistakes, delete_all_logs_of_question, delete_shared_question
+    clear_user_mistakes, delete_all_logs_of_question, delete_shared_question,
+    increment_challenge_stats
 )
-from ai_engine import generate_ai_question
+from ai_engine import generate_ai_question, evaluate_challenge
 
-# --- v10.5 净化守卫版 ---
-st.set_page_config(page_title="Zhongkao-Navigator Pro v10.5", page_icon="💎", layout="wide")
+# --- v10.8 智能分类与判官回归版 ---
+st.set_page_config(page_title="Zhongkao-Navigator Pro v10.8", page_icon="💎", layout="wide")
 
 # --- UI 样式 ---
 st.markdown("""
@@ -48,6 +49,7 @@ def format_html(text):
 if 'user' not in st.session_state: st.session_state.user = None
 if 'challenge_q' not in st.session_state: st.session_state.challenge_q = None
 if 'redo_q' not in st.session_state: st.session_state.redo_q = None
+if 'show_challenge_box' not in st.session_state: st.session_state.show_challenge_box = False
 
 def main():
     if st.session_state.user is None: show_auth()
@@ -56,7 +58,7 @@ def main():
 def show_auth():
     c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
-        st.markdown("<h2 style='text-align:center;'>💎 语文导航 Pro v10.5</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>💎 语文导航 Pro v10.8</h2>", unsafe_allow_html=True)
         t = st.tabs(["🔑 登录", "📝 注册"])
         with t[0]:
             u = st.text_input("账号 ID")
@@ -78,7 +80,6 @@ def app_shell():
     profile = get_profile(user.id) or {"name": "新同学"}
     acc = str(profile.get('account_name', user.email.split('@')[0])).lower()
     
-    # 核心修复：更严格的管理员判定
     name_str = str(profile.get('name', '')).lower()
     is_admin = ('zhoumingen' in acc) or ('周铭恩' in name_str) or ('hongyi' in acc and any(c.isdigit() for c in acc))
     
@@ -87,11 +88,12 @@ def app_shell():
         menu = ["🌟 精选题库", "🚩 错题挑战", "🏆 荣耀金榜", "📊 个人画像"]
         if is_admin: menu.insert(0, "📖 命题实验室")
         
-        # 丝滑导航 (无 rerun)
         if st.session_state.challenge_q or st.session_state.redo_q:
             st.info("🎯 答题模式进行中")
             if st.button("⬅️ 强制退出"):
-                st.session_state.challenge_q = None; st.session_state.redo_q = None; st.rerun()
+                st.session_state.challenge_q = None; st.session_state.redo_q = None
+                st.session_state.show_challenge_box = False
+                st.rerun()
             active_tab = None 
         else:
             active_tab = st.radio("系统频道", menu, key="nav_radio")
@@ -109,41 +111,59 @@ def app_shell():
         elif active_tab == "📖 命题实验室": render_admin_lab()
 
 def render_selected_questions(is_admin):
-    st.markdown("<div class='page-header'><h1>🌟 老师精选题库</h1><p>已过滤无效数据的纯净版题库</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-header'><h1>🌟 老师精选题库</h1><p>分门别类，攻克考点</p></div>", unsafe_allow_html=True)
     qs = get_community_selected()
-    if not qs: st.info("目前没有精选题目")
-    for q in qs:
-        with st.container():
-            st.markdown(f"### 【{q.get('category', '综合')}】 {format_html(q.get('question'))}", unsafe_allow_html=True)
-            
-            c1, c2 = st.columns([1, 4])
-            if c1.button("立即挑战", key=f"sel_v10_{q['id']}"):
-                st.session_state.challenge_q = q; st.rerun()
-                
-            if is_admin:
-                if c2.button("🗑️ 强力清除", key=f"del_sel_{q['id']}"):
-                    delete_shared_question(q['id'])
-                    st.toast("✅ 已从精选题库永久删除")
-                    time.sleep(0.5); st.rerun()
-            st.divider()
+    if not qs: 
+        st.info("目前没有精选题目")
+        return
+        
+    cats = sorted(list(set([q.get('category', '综合') for q in qs])))
+    tabs = st.tabs(cats)
+    
+    for i, cat in enumerate(cats):
+        with tabs[i]:
+            cat_qs = [q for q in qs if q.get('category', '综合') == cat]
+            for q in cat_qs:
+                with st.container():
+                    st.markdown(f"### {format_html(q.get('question'))}", unsafe_allow_html=True)
+                    
+                    c1, c2 = st.columns([1, 4])
+                    if c1.button("立即挑战", key=f"sel_v10_{q['id']}"):
+                        st.session_state.challenge_q = q; st.rerun()
+                        
+                    if is_admin:
+                        if c2.button("🗑️ 强力清除", key=f"del_sel_{q['id']}"):
+                            delete_shared_question(q['id'])
+                            st.toast("✅ 已从精选题库永久删除")
+                            time.sleep(0.5); st.rerun()
+                    st.divider()
 
 def render_mistake_stream(is_admin):
-    st.markdown("<div class='page-header'><h1>🚩 全站连斩错题流</h1><p>全站师生共同攻克的易错难点</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-header'><h1>🚩 全站连斩错题流</h1><p>全站师生共同攻克的易错难点，按考点分类整理</p></div>", unsafe_allow_html=True)
     mk = get_public_mistakes_with_kills()
-    if not mk: st.success("目前全站没有精选错题。去精选题库试试身手吧！")
-    for m in mk:
-        st.markdown(f"<div class='mistake-card'><span class='kill-badge'>⚔️ 连斩 {m.get('kill_count', 1)} 人</span> {format_html(m.get('question'))}</div>", unsafe_allow_html=True)
+    if not mk: 
+        st.success("目前全站没有精选错题。去精选题库试试身手吧！")
+        return
         
-        c1, c2 = st.columns([1, 4])
-        if c1.button("终结此题", key=f"mk_v10_{m.get('id', random.random())}"):
-            st.session_state.challenge_q = m; st.rerun()
-            
-        if is_admin:
-            if c2.button("🗑️ 拔除错题", key=f"del_mk_{m.get('id', random.random())}"):
-                delete_all_logs_of_question(m.get('question'))
-                st.toast("✅ 该错题已从全站记录中抹除")
-                time.sleep(0.5); st.rerun()
-        st.write("") 
+    cats = sorted(list(set([m.get('category', '综合') for m in mk])))
+    tabs = st.tabs(cats)
+    
+    for i, cat in enumerate(cats):
+        with tabs[i]:
+            cat_mk = [m for m in mk if m.get('category', '综合') == cat]
+            for m in cat_mk:
+                st.markdown(f"<div class='mistake-card'><span class='kill-badge'>⚔️ 连斩 {m.get('kill_count', 1)} 人</span> {format_html(m.get('question'))}</div>", unsafe_allow_html=True)
+                
+                c1, c2 = st.columns([1, 4])
+                if c1.button("终结此题", key=f"mk_v10_{m.get('id', random.random())}"):
+                    st.session_state.challenge_q = m; st.rerun()
+                    
+                if is_admin:
+                    if c2.button("🗑️ 拔除错题", key=f"del_mk_{m.get('id', random.random())}"):
+                        delete_all_logs_of_question(m.get('question'))
+                        st.toast("✅ 该错题已从全站记录中抹除")
+                        time.sleep(0.5); st.rerun()
+                st.write("") 
 
 def render_leaderboard(current_user_is_admin):
     st.markdown("<div class='page-header'><h1>🏆 七维荣耀金榜</h1><p>全面回归的7项竞技数据</p></div>", unsafe_allow_html=True)
@@ -236,10 +256,14 @@ def render_personal_dashboard():
         else: st.success("干得漂亮！错题集目前是空的。")
 
 def render_admin_lab():
-    st.markdown("<div class='page-header'><h1>📖 命题实验室</h1><p>高质量出题机</p></div>", unsafe_allow_html=True)
-    if st.button("✨ 生成字音精选题"):
+    st.markdown("<div class='page-header'><h1>📖 命题实验室</h1><p>高质量出题机与题库调度中心</p></div>", unsafe_allow_html=True)
+    
+    cats = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础", "文学常识与传统文化"]
+    sel_cat = st.selectbox("🎯 选择本次命题的考点方向：", cats)
+    
+    if st.button(f"✨ 立即生成一道【{sel_cat}】考题"):
         with st.spinner("🧠 深层AI 命题网络运行中..."):
-            st.session_state.lab_q = generate_ai_question(None, "precise", "字音辨析")
+            st.session_state.lab_q = generate_ai_question(None, "precise", sel_cat)
             
     if 'lab_q' in st.session_state and st.session_state.lab_q:
         q = st.session_state.lab_q
@@ -248,20 +272,23 @@ def render_admin_lab():
         
         st.markdown(f"<div style='background-color:#f0fdf4; padding: 15px; border-radius: 8px; border-left: 5px solid #22c55e; margin-bottom: 15px;'><h3>{format_html(q_text)}</h3></div>", unsafe_allow_html=True)
         
-        # 完美展示独立选项
         for k in ["A", "B", "C", "D"]:
             v = opts.get(k) or opts.get(k.lower())
-            if v:
-                st.write(f"**{k}.** {v}")
+            if v: st.write(f"**{k}.** {v}")
                 
         with st.expander("👀 查看答案与解析"):
             st.success(f"正确答案：{q.get('answer')}")
             st.info(f"解析：{q.get('analysis')}")
             
-        if st.button("🚀 确认无误，发布到全站"): 
-            share_to_community(q, q.get('category', '字音辨析'), st.session_state.user.id)
-            st.toast("✅ 题目已发布到全站精选题库！")
+        c1, c2 = st.columns(2)
+        if c1.button("🚀 确认无误，发布到全站精选题库"): 
+            share_to_community(q, q.get('category', sel_cat), st.session_state.user.id)
+            st.toast("✅ 题目已成功发布！")
             time.sleep(1)
+            st.session_state.lab_q = None
+            st.rerun()
+            
+        if c2.button("🗑️ 这题不行，直接废弃并重新生成"):
             st.session_state.lab_q = None
             st.rerun()
 
@@ -281,15 +308,38 @@ def render_challenge_mode():
     
     ans = st.radio("请选择答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key="act_v10", index=None)
     
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     if ans and c1.button("确认提交"):
         log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q, ans, (ans == q.get('answer')), 5.0)
         if ans == q.get('answer'): st.success("🎉 正确！挑战成功！"); st.balloons()
         else: st.error(f"❌ 错误。正确答案是：{q.get('answer')}")
         st.info(f"💡 解析：{q.get('analysis')}")
     
-    if c2.button("⬅️ 退出挑战"):
-        st.session_state.challenge_q = None; st.rerun()
+    if c2.button("🚨 质疑 AI"):
+        st.session_state.show_challenge_box = True
+        
+    if c3.button("⬅️ 退出挑战"):
+        st.session_state.challenge_q = None
+        st.session_state.show_challenge_box = False
+        st.rerun()
+        
+    if st.session_state.get('show_challenge_box'):
+        st.divider()
+        st.markdown("### 🚨 发起质疑：化身铁面判官")
+        reason = st.text_area("请详细说明这道题哪里出错了（如：答案不对、超纲、题干模糊等）：")
+        if st.button("提交给最高评判网络"):
+            with st.spinner("🧠 判官模型正在重新推演此题..."):
+                try:
+                    success, reply = evaluate_challenge(q, reason)
+                except Exception as e:
+                    success, reply = False, f"调用异常，驳回：{e}"
+                    
+                increment_challenge_stats(st.session_state.user.id, success)
+                
+                if success:
+                    st.success(f"🎉 判官大人英明！你的名字已被记录在质疑榜！AI回复：{reply}")
+                else:
+                    st.error(f"❌ 证据不足，你的质疑被驳回！AI回复：{reply}")
 
 def render_redo_mode():
     q = st.session_state.redo_q
@@ -310,7 +360,9 @@ def render_redo_mode():
         else: st.error("仍然错误，请继续复习。")
     
     if c2.button("⬅️ 返回错题本"):
-        st.session_state.redo_q = None; st.rerun()
+        st.session_state.redo_q = None
+        st.session_state.show_challenge_box = False
+        st.rerun()
 
 if __name__ == "__main__":
     main()
