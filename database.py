@@ -27,7 +27,8 @@ def sign_up_and_login(username, password, name, class_name):
     try:
         response = supabase.auth.sign_up({"email": email, "password": password})
         if response.user:
-            supabase.table("profiles").insert({"id": response.user.id, "name": name, "class_name": class_name}).execute()
+            acc_name = username.lower()
+            supabase.table("profiles").insert({"id": response.user.id, "name": name, "class_name": class_name, "account_name": acc_name}).execute()
             return response.user, None
         return None, "注册失败"
     except Exception as e: return None, str(e)
@@ -39,7 +40,7 @@ def get_profile(uid):
         return res.data
     except: return None
 
-# --- 数据操作 ---
+# --- 数据操作 v7.5 ---
 def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent):
     supabase = get_supabase()
     try:
@@ -51,12 +52,42 @@ def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent
         }).execute()
     except: pass
 
+def record_challenge(uid, is_success=False):
+    supabase = get_supabase()
+    try:
+        # v7.5 增强：如果列不存在，操作会静默失败而不会导致 app 崩溃
+        p = get_profile(uid)
+        if not p: return
+        new_count = (p.get('challenge_count') or 0) + 1
+        new_success = (p.get('challenge_success_count') or 0) + (1 if is_success else 0)
+        supabase.table("profiles").update({
+            "challenge_count": new_count, "challenge_success_count": new_success
+        }).eq("id", uid).execute()
+    except: pass
+
 def get_leaderboard_data():
     supabase = get_supabase()
     try:
-        # v7.2 回归：极简查询，不依赖任何新列
-        res = supabase.table("user_rankings").select("*").execute()
-        return res.data if res.data else []
+        # v7.5 鲁棒查询：先尝试连表获取 account_name 和质疑战绩
+        try:
+            res = supabase.table("user_rankings").select("*, profiles(account_name, challenge_count, challenge_success_count)").execute()
+            if res.data:
+                flat = []
+                for r in res.data:
+                    p = r.get('profiles') or {}
+                    r['account_name'] = p.get('account_name', '')
+                    r['challenge_count'] = p.get('challenge_count', 0)
+                    r['challenge_success_count'] = p.get('challenge_success_count', 0)
+                    flat.append(r)
+                return flat
+        except:
+            # 彻底降级：只拿基础排名
+            res = supabase.table("user_rankings").select("*").execute()
+            if res.data:
+                for r in res.data:
+                    r['account_name'] = ""; r['challenge_count'] = 0; r['challenge_success_count'] = 0
+                return res.data
+        return []
     except: return []
 
 def delete_shared_question_by_id(q_id):
