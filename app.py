@@ -159,8 +159,17 @@ def refresh_q(targets):
             res = generate_ai_question(None, "grammar", "病句")
         elif target_focus and "3500字" in target_focus:
             chars = chars_lib.get('chars', [])
-            pool = chars[:1500] if "基础" in target_focus else chars[1500:]
-            res = generate_ai_question(random.choice(pool), "discovery", "字词扩展")
+            if not chars: chars = ["确", "凿", "酝", "酿"] # 绝对保底
+            
+            # 动态切片防御
+            if "基础" in target_focus:
+                pool = chars[:min(len(chars), 1500)]
+            else:
+                pool = chars[1500:] if len(chars) > 1500 else chars
+            
+            # 确保 pool 不为空
+            chosen_char = random.choice(pool) if pool else "中"
+            res = generate_ai_question(chosen_char, "discovery", "字词扩展")
         else:
             pool = assets_db.get('content', [])
             items = random.sample(pool, 2) if pool else None
