@@ -27,7 +27,9 @@ def sign_up_and_login(username, password, name, class_name):
     try:
         response = supabase.auth.sign_up({"email": email, "password": password})
         if response.user:
-            supabase.table("profiles").insert({"id": response.user.id, "name": name, "class_name": class_name}).execute()
+            # 记录注册时的账号名到 profiles
+            acc_name = username.lower()
+            supabase.table("profiles").insert({"id": response.user.id, "name": name, "class_name": class_name, "account_name": acc_name}).execute()
             return response.user, None
         return None, "注册失败"
     except Exception as e: return None, str(e)
@@ -39,11 +41,8 @@ def get_profile(uid):
         return res.data
     except: return None
 
-# --- 数据操作 v6.7 ---
+# --- 数据操作 ---
 def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent):
-    """
-    v6.7 升级：存储完整的题目对象，确保错题挑战时数据完整
-    """
     supabase = get_supabase()
     try:
         supabase.table("answer_logs").insert({
@@ -53,14 +52,6 @@ def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent
             "is_correct": is_correct, "time_spent": time_spent
         }).execute()
     except: pass
-
-def delete_all_logs_of_question(q_text):
-    """管理员专用：清除全站该题的所有错误记录"""
-    supabase = get_supabase()
-    try:
-        supabase.table("answer_logs").delete().eq("question", q_text).execute()
-        return True
-    except: return False
 
 def record_challenge(uid, is_success=False):
     supabase = get_supabase()
@@ -74,10 +65,33 @@ def record_challenge(uid, is_success=False):
         }).eq("id", uid).execute()
     except: pass
 
+def get_leaderboard_data():
+    supabase = get_supabase()
+    try:
+        # v7.1 升级：必须获取 account_name 字段以便过滤管理员
+        res = supabase.table("user_rankings").select("*, profiles(account_name, challenge_count, challenge_success_count)").execute()
+        if not res.data: return []
+        flat = []
+        for r in res.data:
+            p = r.get('profiles') or {}
+            r['account_name'] = p.get('account_name', '')
+            r['challenge_count'] = p.get('challenge_count', 0)
+            r['challenge_success_count'] = p.get('challenge_success_count', 0)
+            flat.append(r)
+        return flat
+    except: return []
+
 def delete_shared_question_by_id(q_id):
     supabase = get_supabase()
     try:
         supabase.table("shared_questions").delete().eq("id", q_id).execute()
+        return True
+    except: return False
+
+def delete_all_logs_of_question(q_text):
+    supabase = get_supabase()
+    try:
+        supabase.table("answer_logs").delete().eq("question", q_text).execute()
         return True
     except: return False
 
@@ -96,22 +110,7 @@ def share_to_community(q_data, category, uid):
         return True
     except: return False
 
-def get_leaderboard_data():
-    supabase = get_supabase()
-    try:
-        res = supabase.table("user_rankings").select("*, profiles(challenge_count, challenge_success_count)").execute()
-        if res.data:
-            flat = []
-            for r in res.data:
-                p = r.get('profiles') if r.get('profiles') else {}
-                r['challenge_count'] = p.get('challenge_count', 0)
-                r['challenge_success_count'] = p.get('challenge_success_count', 0)
-                flat.append(r)
-            return flat
-        return []
-    except: return []
-
-def get_community_selected(limit=20):
+def get_community_selected(limit=50):
     supabase = get_supabase()
     try:
         res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).limit(limit).execute()
@@ -121,14 +120,12 @@ def get_community_selected(limit=20):
 def get_public_mistakes_with_kills(limit=20):
     supabase = get_supabase()
     try:
-        # v6.7 修复：查询必须包含完整题目字段以供挑战
         res = supabase.table("answer_logs").select("question, options, answer, analysis, category").eq("is_correct", False).execute()
         if not res.data: return []
-        counts = {}; processed = []; seen = set()
+        counts = {}; processed = []
         for r in res.data:
             q = r['question']
-            if q not in counts:
-                counts[q] = 1; processed.append(r); seen.add(q)
+            if q not in counts: counts[q] = 1; processed.append(r)
             else: counts[q] += 1
         for p in processed: p['kill_count'] = counts[p['question']]
         return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
@@ -138,7 +135,7 @@ def get_random_shared_question():
     supabase = get_supabase()
     try:
         res = supabase.table("shared_questions").select("*").execute()
-        return random.choice(res.data) if res.data else None
+        return random.choice(res.data) if res.data and res.data else None
     except: return None
 
 def get_user_all_logs(uid):
