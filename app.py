@@ -6,7 +6,7 @@ import uuid
 import time
 import random
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from database import (
     sign_in, sign_up_and_login, get_profile, log_quiz_result, 
     get_user_all_logs, share_to_community, get_community_selected, 
@@ -15,8 +15,10 @@ from database import (
 )
 from ai_engine import generate_ai_question, sanitize_question, re_verify_question
 
-# --- v6.0 真理战线 & 管理员版 ---
-st.set_page_config(page_title="Zhongkao-Navigator v6.0", page_icon="🛡️", layout="wide")
+# --- v6.0.1 修复版 ---
+st.set_page_config(page_title="Zhongkao-Navigator v6.0.1", page_icon="🛡️", layout="wide")
+
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 # --- UI 样式 ---
 st.markdown("""
@@ -25,7 +27,6 @@ st.markdown("""
     .gold-medal { color: #d4af37; font-weight: bold; font-size: 1.25rem; }
     .admin-badge { background-color: #dc2626; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; }
     .disclaimer { font-size: 0.8rem; color: #64748b; text-align: center; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; background: white; }
-    .king-card { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white; padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 10px; border: 2px solid #d4af37; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -91,7 +92,7 @@ def app_body():
         st.session_state.current_page = st.radio("导航", pages, index=idx)
         st.divider()
         st.session_state.targets = st.multiselect("锁定考点：", ["字音辨析", "字形纠错", "成语运用", "病句诊断", "3500字基础", "3500字进阶"], default=st.session_state.targets)
-        if st.button("注销注销"): st.session_state.user = None; st.rerun()
+        if st.button("注销退出"): st.session_state.user = None; st.rerun()
 
     if st.session_state.current_page == "📖 专项训练": brush_page()
     elif st.session_state.current_page == "🏰 社区广场": community_page(is_admin)
@@ -99,128 +100,96 @@ def app_body():
 
 def brush_page():
     st.header("真理战线·专项练习")
-    st.markdown("<div class='disclaimer'>AI 可能存在错误，请大胆质疑。题目已根据你的练习历史自动优化密度。</div>", unsafe_allow_html=True)
-    
+    st.markdown("<div class='disclaimer'>AI 可能存在错误，请大胆质疑。</div>", unsafe_allow_html=True)
     c1, c2 = st.columns([5, 1])
     with c2:
         if st.button("✨ 换一题", use_container_width=True) or st.session_state.current_q is None:
             refresh_q(st.session_state.targets)
             st.rerun()
-
     q = st.session_state.current_q
     if q and "error" not in q:
-        st.markdown(f"<span class='badge'>{q.get('category', '综合')}</span>", unsafe_allow_html=True)
+        st.markdown(f"**分类**：{q.get('category', '综合')}")
         st.markdown(f"### {format_text(q['question'])}", unsafe_allow_html=True)
-        ans = st.radio("你的回答：", ["A", "B", "C", "D"], 
-                       format_func=lambda x: f"{x}. {q['options'].get(x, '...')}", 
-                       key=st.session_state.question_id, index=None, disabled=st.session_state.answered)
-        
+        ans = st.radio("你的回答：", ["A", "B", "C", "D"], format_func=lambda x: f"{x}. {q['options'].get(x, '...')}", key=st.session_state.question_id, index=None, disabled=st.session_state.answered)
         if ans and not st.session_state.answered:
             st.session_state.answered = True
             is_correct = (ans == q['answer'])
             log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q['question'], ans, is_correct, time.time() - st.session_state.start_time, q['analysis'])
             if is_correct: st.success("🎉 正确！"); st.balloons()
-            else: st.error(f"❌ 错误。答案是：{q['answer']}")
-
+            else: st.error(f"❌ 错误。答案：{q['answer']}")
         if st.session_state.answered:
-            st.info(f"💡 **AI 解析**：{q['analysis']}")
+            st.info(f"💡 AI 解析：{q['analysis']}")
             c1, c2, c3 = st.columns([2, 2, 4])
             with c1:
-                if st.button("👍 分享好题"):
-                    share_to_community(q, q.get('category', '综合'), st.session_state.user.id)
-                    st.toast("已同步")
+                if st.button("👍 分享好题"): share_to_community(q, q.get('category', '综合'), st.session_state.user.id); st.toast("已同步")
             with c2:
                 if st.button("🚩 质疑题目"):
-                    with st.spinner("AI 正在深度自查..."):
+                    with st.spinner("自查中..."):
                         review = re_verify_question(q)
                         st.warning(review)
-                        if "【AI 已认错】" in review:
-                            st.error("此题已标记为错误，系统已自动拦截该题。")
-                            # 若是共享题，直接尝试删除
-                            if 'id' in q: delete_shared_question_by_id(q['id'])
+                        if "【AI 已认错】" in review and 'id' in q: delete_shared_question_by_id(q['id'])
             with c3:
-                if st.button("下一题 ➡️", use_container_width=True):
-                    refresh_q(st.session_state.targets)
-                    st.rerun()
+                if st.button("下一题 ➡️", use_container_width=True): refresh_q(st.session_state.targets); st.rerun()
 
 def refresh_q(targets):
     st.session_state.answered = False
     st.session_state.question_id = str(uuid.uuid4())
     st.session_state.start_time = time.time()
-    
-    with st.spinner("AI 正在精心命题..."):
-        # 尝试从社区库抽题（过滤掉已见过的）
+    with st.spinner("出题中..."):
         if random.random() < 0.2:
             q = get_random_shared_question()
             if q and q.get('id') not in st.session_state.seen_q_ids:
-                st.session_state.seen_q_ids.add(q.get('id'))
-                st.session_state.current_q = q
-                return
-        
-        # 新生成逻辑
+                st.session_state.seen_q_ids.add(q.get('id')); st.session_state.current_q = q; return
         target_focus = random.choice(targets) if targets else None
-        res = generate_ai_question(None, "precise", target_focus)
-        st.session_state.current_q = res
+        st.session_state.current_q = generate_ai_question(None, "precise", target_focus)
 
 def community_page(is_admin):
     st.header("🏰 荣耀社区广场")
     t1, t2, t3 = st.tabs(["🏆 荣耀金榜", "🌟 精选题库", "🚩 连斩错题"])
-    
     with t1:
         data = get_leaderboard_data()
         if data:
             df = pd.DataFrame(data)
-            # 各赛道独立展示 (回归 v4.5 风格)
             c1, c2, c3 = st.columns(3)
             with c1:
                 st.markdown("#### 🔥 勤奋榜")
-                top = df.sort_values('total_questions', ascending=False).head(10)
-                for i, r in top.reset_index().iterrows():
-                    style = "gold-medal" if i == 0 else ""
-                    st.markdown(f"{i+1}. <span class='{style}'>{r['name']}</span> - {r['total_questions']}题", unsafe_allow_html=True)
+                top = df.sort_values('total_questions', ascending=False).head(10).reset_index()
+                for i, r in top.iterrows():
+                    st.markdown(f"{i+1}. <span class=\"{'gold-medal' if i==0 else ''}\">{r['name']}</span> - {r['total_questions']}题", unsafe_allow_html=True)
             with c2:
                 st.markdown("#### ⚔️ 战神榜")
-                top = df.sort_values('correct_questions', ascending=False).head(10)
-                for i, r in top.reset_index().iterrows():
-                    style = "gold-medal" if i == 0 else ""
-                    st.markdown(f"{i+1}. <span class='{style}'>{r['name']}</span> - {r['correct_questions']}对", unsafe_allow_html=True)
+                top = df.sort_values('correct_questions', ascending=False).head(10).reset_index()
+                for i, r in top.iterrows():
+                    st.markdown(f"{i+1}. <span class=\"{'gold-medal' if i==0 else ''}\">{r['name']}</span> - {r['correct_questions']}对", unsafe_allow_html=True)
             with c3:
                 st.markdown("#### 💡 贡献榜")
-                top = df.sort_values('contributions', ascending=False).head(10)
-                for i, r in top.reset_index().iterrows():
-                    style = "gold-medal" if i == 0 else ""
-                    st.markdown(f"{i+1}. <span class='{style}'>{r['name']}</span> - {r['contributions']}次", unsafe_allow_html=True)
-
+                top = df.sort_values('contributions', ascending=False).head(10).reset_index()
+                for i, r in top.iterrows():
+                    st.markdown(f"{i+1}. <span class=\"{'gold-medal' if i==0 else ''}\">{r['name']}</span> - {r['contributions']}次", unsafe_allow_html=True)
     with t2:
         for q in get_community_selected():
             with st.expander(f"【{q['category']}】 {q['question'][:30]}..."):
                 st.markdown(f"⭐ {q.get('recommend_count', 1)} 人推荐")
-                st.markdown(format_text(q['question']))
                 cols = st.columns([1, 1, 4])
-                if cols[0].button("立即挑战", key=f"sq_{q['id']}"):
+                if cols[0].button("挑战", key=f"sq_{q['id']}"):
                     st.session_state.current_q = q; st.session_state.current_page = "📖 专项训练"; st.rerun()
                 if is_admin:
                     if cols[1].button("🗑️ 删除", key=f"del_sq_{q['id']}"):
                         if delete_shared_question_by_id(q['id']): st.toast("已删除"); st.rerun()
-
     with t3:
         for m in get_public_mistakes_with_kills():
-            with st.container():
-                kills = m.get('kill_count', 1)
-                st.markdown(f"<span class='kill-streak'>⚔️ 连斩 {kills} 人</span>", unsafe_allow_html=True)
-                st.error(format_text(m['question']))
-                if is_admin:
-                    if st.button("🗑️ 强制下架", key=f"del_m_{kills}_{random.random()}"):
-                        # 错题流删除逻辑（如果是共享题）
-                        pass
+            kills = m.get('kill_count', 1)
+            st.error(f"⚔️ 连斩 {kills} 人 | {format_text(m['question'])}")
+            if st.button("终结连斩", key=f"kill_{kills}_{random.random()}"):
+                st.session_state.current_q = m; st.session_state.current_page = "📖 专项训练"; st.rerun()
 
 def dashboard_page():
-    st.header("📊 深度能力画像")
-    # ... 看板逻辑保持 v5.6 ...
+    st.header("📊 能力画像")
     logs = get_user_all_logs(st.session_state.user.id)
     if logs:
         df = pd.DataFrame(logs)
-        st.plotly_chart(px.line(df.groupby('category')['is_correct'].mean().reset_index(), x='category', y='is_correct', title="各板块正确率"), use_container_width=True)
+        df['created_at'] = pd.to_datetime(df['created_at']).dt.tz_convert('Asia/Shanghai')
+        st.plotly_chart(px.line(df.groupby(df['created_at'].dt.floor('10min'))['is_correct'].mean().reset_index(), x='created_at', y='is_correct', title="状态波动图"), use_container_width=True)
     else: st.info("暂无数据")
 
 if __name__ == "__main__":

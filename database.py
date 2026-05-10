@@ -39,7 +39,7 @@ def get_profile(uid):
         return res.data
     except: return None
 
-# --- 数据操作 v6.0 ---
+# --- 数据操作 ---
 def log_quiz_result(uid, category, question_text, student_answer, is_correct, time_spent, analysis=""):
     supabase = get_supabase()
     try:
@@ -50,7 +50,6 @@ def log_quiz_result(uid, category, question_text, student_answer, is_correct, ti
     except: pass
 
 def delete_shared_question_by_id(q_id):
-    """管理员专用：物理删除题目"""
     supabase = get_supabase()
     try:
         supabase.table("shared_questions").delete().eq("id", q_id).execute()
@@ -91,12 +90,10 @@ def get_public_mistakes_with_kills(limit=20):
     try:
         res = supabase.table("answer_logs").select("question, category, analysis").eq("is_correct", False).execute()
         if not res.data: return []
-        counts = {}
-        processed = []
+        counts = {}; processed = []
         for r in res.data:
             q = r['question']
-            if q not in counts:
-                counts[q] = 1; processed.append(r)
+            if q not in counts: counts[q] = 1; processed.append(r)
             else: counts[q] += 1
         for p in processed: p['kill_count'] = counts[p['question']]
         return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
