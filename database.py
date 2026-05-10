@@ -67,6 +67,42 @@ def get_leaderboard_data():
         return flat
     except: return []
 
+def get_community_selected(limit=100):
+    supabase = get_supabase()
+    try:
+        res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).limit(limit).execute()
+        return res.data if res.data else []
+    except: return []
+
+def get_public_mistakes_with_kills(limit=20):
+    supabase = get_supabase()
+    try:
+        res_logs = supabase.table("answer_logs").select("question, options, answer, analysis, category").eq("is_correct", False).execute()
+        if not res_logs.data: return []
+        
+        res_shared = supabase.table("shared_questions").select("question").execute()
+        # v8.0 增强型匹配：去除空格和换行符，确保只要内容一致就能自动上线
+        shared_texts = set([str(s['question']).strip() for s in res_shared.data])
+        
+        counts = {}; processed = []; seen = set()
+        for r in res_logs.data:
+            q_text = str(r['question']).strip()
+            if q_text in shared_texts:
+                if q_text not in counts:
+                    counts[q_text] = 1; processed.append(r); seen.add(q_text)
+                else: counts[q_text] += 1
+        
+        for p in processed: p['kill_count'] = counts[str(p['question']).strip()]
+        return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
+    except: return []
+
+def get_user_all_logs(uid):
+    supabase = get_supabase()
+    try:
+        res = supabase.table("answer_logs").select("*").eq("user_id", uid).execute()
+        return res.data if res.data else []
+    except: return []
+
 def delete_shared_question_by_id(q_id):
     supabase = get_supabase()
     try:
@@ -80,51 +116,3 @@ def delete_all_logs_of_question(q_text):
         supabase.table("answer_logs").delete().eq("question", q_text).execute()
         return True
     except: return False
-
-def share_to_community(q_data, category, uid):
-    supabase = get_supabase()
-    try:
-        supabase.table("shared_questions").insert({
-            "category": category, "question": q_data["question"], "options": q_data["options"],
-            "answer": q_data["answer"], "analysis": q_data["analysis"], "user_id": uid, "recommend_count": 1
-        }).execute()
-        return True
-    except: return False
-
-def get_community_selected(limit=100):
-    supabase = get_supabase()
-    try:
-        res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).limit(limit).execute()
-        return res.data if res.data else []
-    except: return []
-
-def get_public_mistakes_with_kills(limit=20):
-    supabase = get_supabase()
-    try:
-        # v7.8 核心逻辑：获取所有错误记录
-        res_logs = supabase.table("answer_logs").select("question, options, answer, analysis, category").eq("is_correct", False).execute()
-        if not res_logs.data: return []
-        
-        # 获取所有精选题目的文本，用于过滤源头
-        res_shared = supabase.table("shared_questions").select("question").execute()
-        shared_texts = set([s['question'] for s in res_shared.data])
-        
-        counts = {}; processed = []; seen = set()
-        for r in res_logs.data:
-            q_text = r['question']
-            # 只有源自“精选题库”的错题才上榜
-            if q_text in shared_texts:
-                if q_text not in counts:
-                    counts[q_text] = 1; processed.append(r); seen.add(q_text)
-                else: counts[q_text] += 1
-        
-        for p in processed: p['kill_count'] = counts[p['question']]
-        return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
-    except: return []
-
-def get_user_all_logs(uid):
-    supabase = get_supabase()
-    try:
-        res = supabase.table("answer_logs").select("*").eq("user_id", uid).execute()
-        return res.data if res.data else []
-    except: return []
