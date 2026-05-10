@@ -57,39 +57,39 @@ def generate_ai_question(items, mode, target_hint=None):
         if isinstance(items, list): context = "; ".join([it.get('word', '') for it in items if isinstance(it, dict)])
         else: context = str(items)
 
-    # --- v5.0 DeepSeek V4 适配与严谨 Prompt ---
+    # --- v5.1 保守命题补丁 (严禁玄学) ---
     prompt = f"""
-    你现在是 DeepSeek V4 支持下的中考专家组，针对【{context}】命制一道选择题。
-    考查类型需求：{target_hint or '全随机'}
+    你现在是中考命题委员会的资深研究员，针对【{context}】命制一道选择题。
     
-    ⚠️ 命题准则：
-    1. 真实性：严禁发明错误的语法。
-    2. 严谨性：答案唯一，解析透彻。
-    3. 标注：考查字词用（ ）包裹。
+    ⚠️ 核心禁令 (核心错误准则)：
+    1. 【严禁玄学】：错误选项必须有“硬伤”（如：主谓搭配不当、成分残缺、褒贬误用、逻辑截然相反等）。
+    2. 【严禁主观】：严禁以“语气生硬”、“表达不地道”等模糊理由作为错误标准。错误项必须能用一句话说清它违反了哪条语法或逻辑规则。
+    3. 【保守风格】：题目风格应效仿人教版正式考试题，正确项必须无可挑剔。
     
-    输出格式：JSON {{question, options, answer, analysis, category}}。
+    输出格式：JSON {{question, options, answer, analysis, category}}。标注用（ ）。
     """
 
     try:
+        # 尝试 V4
         response = client.chat.completions.create(
-            model="deepseek-v4", # 适配 V4 模型
+            model="deepseek-v4",
             messages=[
-                {"role": "system", "content": "你是一个只输出 JSON 的 V4 教育专家。"},
+                {"role": "system", "content": "你是一个极其保守、严谨的中考专家，只输出 JSON。"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.5
+            temperature=0.3 # 进一步降低随机性
         )
         raw = extract_json_robustly(response.choices[0].message.content)
         return sanitize_question(raw, default_cat=target_hint or "综合")
-    except Exception as e:
-        # 降级处理：如果 V4 模型不存在，切换到 deepseek-chat
+    except:
+        # 回退到稳定版
         try:
             response = client.chat.completions.create(
                 model="deepseek-chat",
-                messages=[{"role": "system", "content": "只输出 JSON"}, {"role": "user", "content": prompt}],
-                temperature=0.5
+                messages=[{"role": "system", "content": "严禁玄学，只输出 JSON"}, {"role": "user", "content": prompt}],
+                temperature=0.3
             )
             raw = extract_json_robustly(response.choices[0].message.content)
             return sanitize_question(raw, default_cat=target_hint or "综合")
-        except:
+        except Exception as e:
             return {"error": str(e)}
