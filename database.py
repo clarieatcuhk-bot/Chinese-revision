@@ -51,27 +51,27 @@ def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent
         }).execute()
     except: pass
 
-# --- v8.7 究极容错查询 ---
+# --- v9.0 强化健壮性查询 ---
 def get_leaderboard_data():
     supabase = get_supabase()
     try:
         res_rank = supabase.table("user_rankings").select("*").execute()
-        # 不再指定列名，直接选 * 避免报错
         res_prof = supabase.table("profiles").select("*").execute()
-        
         if not res_rank.data: return []
-        
         prof_map = {p['id']: p for p in (res_prof.data or [])}
         flat = []
         for r in res_rank.data:
-            p = prof_map.get(r['user_id'], {})
-            r['account_name'] = p.get('account_name', '') # 动态获取
+            # 防御性获取 ID：尝试 user_id 或 id
+            uid = r.get('user_id') or r.get('id')
+            if not uid: continue
+            p = prof_map.get(uid, {})
+            r['account_name'] = p.get('account_name', '')
             r['challenge_count'] = p.get('challenge_count', 0)
             r['challenge_success_count'] = p.get('challenge_success_count', 0)
             flat.append(r)
         return flat
     except Exception as e:
-        st.error(f"排行榜抓取失败: {e}")
+        print(f"Ranking Fetch Error: {e}")
         return []
 
 def get_public_mistakes_with_kills(limit=20):
