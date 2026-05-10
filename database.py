@@ -1,7 +1,6 @@
 from supabase import create_client, Client
 import streamlit as st
 import random
-import re
 
 @st.cache_resource
 def get_supabase() -> Client:
@@ -53,61 +52,42 @@ def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent
         }).execute()
     except: pass
 
-def clean_q_text(text):
-    if not text: return ""
-    t = str(text).replace("**", "").replace("__", "").replace("<u>", "").replace("</u>", "")
-    return re.sub(r'\s+', '', t)
-
-# --- v8.2 超强韧性查询 ---
+# --- v8.5 全量排行榜查询 (强制 7 项) ---
 def get_leaderboard_data():
     supabase = get_supabase()
     try:
-        # 尝试最完美的连表查询
-        try:
-            res = supabase.table("user_rankings").select("*, profiles(account_name, challenge_count, challenge_success_count)").execute()
-            if res.data:
-                flat = []
-                for r in res.data:
-                    p = r.get('profiles') or {}
-                    r['account_name'] = p.get('account_name', '')
-                    r['challenge_count'] = p.get('challenge_count', 0)
-                    r['challenge_success_count'] = p.get('challenge_success_count', 0)
-                    flat.append(r)
-                return flat
-        except:
-            # 降级：如果 profiles 缺列，仅拿基础排名
-            res = supabase.table("user_rankings").select("*").execute()
-            if res.data:
-                for r in res.data: r['account_name'] = ""; r['challenge_count'] = 0; r['challenge_success_count'] = 0
-                return res.data
+        # 强制连表，如果报错则在 UI 层处理，不再悄悄降级
+        res = supabase.table("user_rankings").select("*, profiles(account_name, challenge_count, challenge_success_count)").execute()
+        if not res.data: return []
+        flat = []
+        for r in res.data:
+            p = r.get('profiles') or {}
+            r['account_name'] = p.get('account_name', '')
+            r['challenge_count'] = p.get('challenge_count', 0)
+            r['challenge_success_count'] = p.get('challenge_success_count', 0)
+            flat.append(r)
+        return flat
+    except Exception as e:
+        # 抛出错误以便 UI 提示
+        st.error(f"排行榜查询失败: {e}. 请确保数据库已增加质疑相关字段。")
         return []
-    except: return []
 
+# --- v8.5 暴力错题同步 (无过滤) ---
 def get_public_mistakes_with_kills(limit=20):
     supabase = get_supabase()
     try:
-        # 1. 拿最新错误日志
-        res_logs = supabase.table("answer_logs").select("*").eq("is_correct", False).order('created_at', desc=True).limit(1000).execute()
-        if not res_logs.data: return []
+        # 暴力拉取最新 500 条错误，不做精选过滤，确保“一定能看见”
+        res = supabase.table("answer_logs").select("*").eq("is_correct", False).order('created_at', desc=True).limit(500).execute()
+        if not res.data: return []
         
-        # 2. 拿精选题库
-        res_sh = supabase.table("shared_questions").select("question").execute()
-        shared_clean_map = {clean_q_text(s['question']): s['question'] for s in res_sh.data}
+        counts = {}; processed = []; seen = set()
+        for r in res.data:
+            q_text = str(r['question']).strip()
+            if q_text not in counts:
+                counts[q_text] = 1; processed.append(r); seen.add(q_text)
+            else: counts[q_text] += 1
         
-        counts = {}; processed = []; seen_std = set()
-        for r in res_logs.data:
-            c_text = clean_q_text(r['question'])
-            if c_text in shared_clean_map:
-                std_text = shared_clean_map[c_text]
-                if std_text not in seen_std:
-                    r['question'] = std_text
-                    processed.append(r)
-                    seen_std.add(std_text)
-                    counts[std_text] = 1
-                else:
-                    counts[std_text] += 1
-        
-        for p in processed: p['kill_count'] = counts.get(p['question'], 1)
+        for p in processed: p['kill_count'] = counts[str(p['question']).strip()]
         return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
     except: return []
 
@@ -135,20 +115,6 @@ def get_user_all_logs(uid):
         res = supabase.table("answer_logs").select("*").eq("user_id", uid).execute()
         return res.data if res.data else []
     except: return []
-
-def get_random_shared_question():
-    supabase = get_supabase()
-    try:
-        res = supabase.table("shared_questions").select("*").execute()
-        return random.choice(res.data) if res.data else None
-    except: return None
-
-def delete_shared_question_by_id(q_id):
-    supabase = get_supabase()
-    try:
-        supabase.table("shared_questions").delete().eq("id", q_id).execute()
-        return True
-    except: return False
 
 def delete_all_logs_of_question(q_text):
     supabase = get_supabase()
