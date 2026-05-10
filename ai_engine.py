@@ -33,7 +33,6 @@ def sanitize_question(q, default_cat="综合"):
         if std not in q:
             for alias in aliases:
                 if alias in q: q[std] = q[alias]; break
-    
     if "category" not in q: q["category"] = default_cat
     opts = q.get("options", {})
     new_opts = {}
@@ -50,44 +49,61 @@ def sanitize_question(q, default_cat="综合"):
 
 def generate_ai_question(items, mode, target_hint=None):
     client = get_ai_client()
-    if not client: return {"error": "AI 配置缺失"}
+    if not client: return {"error": "AI 未配置"}
     
     context = "中考语文核心考点"
     if items:
         if isinstance(items, list): context = "; ".join([it.get('word', '') for it in items if isinstance(it, dict)])
         else: context = str(items)
 
-    # --- v5.5 规范化命题 (最恰当的一项) ---
+    # --- v6.0 强制自检 Prompt ---
     prompt = f"""
     针对【{context}】命制一道选择题。考查类型：{target_hint or '全随机'}。
     
-    ⚠️ 核心规范：
-    1. 题干必须包含“最恰当的一项”字样。
-    2. 干扰项必须有硬伤，正确项无可挑剔。
-    3. 标注用括号。
+    ⚠️ 强制性自我核查 (必须在输出前完成)：
+    1. 核实题干描述是否严谨，是否存在“灰色地带”。
+    2. 确保干扰项必须有明确语法/逻辑错误，禁止“生硬”等主观错误。
+    3. 检查答案与解析是否 100% 对应。
     
-    输出格式：JSON {{question, options, answer, analysis, category}}。
+    输出 JSON {{question, options, answer, analysis, category}}。标注用（ ）。
     """
 
     try:
         response = client.chat.completions.create(
             model="deepseek-v4",
             messages=[
-                {"role": "system", "content": "你是一个极度规范的中考专家，只输出 JSON。"},
+                {"role": "system", "content": "你是一个极度保守、具备自我批判精神的中考专家。"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3
+            temperature=0.2
         )
         raw = extract_json_robustly(response.choices[0].message.content)
         return sanitize_question(raw, default_cat=target_hint or "综合")
-    except:
-        try:
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[{"role": "system", "content": "只输出 JSON"}, {"role": "user", "content": prompt}],
-                temperature=0.3
-            )
-            raw = extract_json_robustly(response.choices[0].message.content)
-            return sanitize_question(raw, default_cat=target_hint or "综合")
-        except Exception as e:
-            return {"error": str(e)}
+    except Exception as e:
+        return {"error": str(e)}
+
+def re_verify_question(q):
+    """
+    质疑题目功能：AI 重新审视自己是否出错
+    """
+    client = get_ai_client()
+    if not client: return "AI 暂不可用"
+    
+    prompt = f"""
+    有用户质疑以下题目可能存在错误：
+    题干：{q['question']}
+    答案：{q['answer']}
+    解析：{q['analysis']}
+    
+    请你重新、深度、批判性地审视这道题。
+    如果你发现之前的答案或题目确实存在逻辑错误，请在回复开头明确说明“【AI 已认错】”，并说明理由。
+    如果你认为题目无误，请给出更深入的理由说明。
+    """
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "system", "content": "你是一个严谨的学术纠错专家。"}, {"role": "user", "content": prompt}],
+            temperature=0.3
+        )
+        return response.choices[0].message.content
+    except: return "质疑请求失败"

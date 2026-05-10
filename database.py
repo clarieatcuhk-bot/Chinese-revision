@@ -12,7 +12,7 @@ def get_supabase() -> Client:
         st.error(f"Supabase 连接失败: {e}")
         return None
 
-# --- 基础操作 ---
+# --- 认证 ---
 def sign_in(username, password):
     supabase = get_supabase()
     email = f"{username}@navigator.com" if "@" not in username else username
@@ -39,7 +39,7 @@ def get_profile(uid):
         return res.data
     except: return None
 
-# --- 核心逻辑 v4.8 (连斩与推荐) ---
+# --- 数据操作 v6.0 ---
 def log_quiz_result(uid, category, question_text, student_answer, is_correct, time_spent, analysis=""):
     supabase = get_supabase()
     try:
@@ -49,20 +49,22 @@ def log_quiz_result(uid, category, question_text, student_answer, is_correct, ti
         }).execute()
     except: pass
 
-def share_to_community(q_data, category, uid):
-    """
-    v4.8 升级：如果题目已存在，增加推荐计数
-    """
+def delete_shared_question_by_id(q_id):
+    """管理员专用：物理删除题目"""
     supabase = get_supabase()
     try:
-        # 先检查是否存在
+        supabase.table("shared_questions").delete().eq("id", q_id).execute()
+        return True
+    except: return False
+
+def share_to_community(q_data, category, uid):
+    supabase = get_supabase()
+    try:
         exist = supabase.table("shared_questions").select("id, recommend_count").eq("question", q_data["question"]).maybe_single().execute()
         if exist.data:
-            # 存在则推荐数 +1
             new_count = (exist.data.get("recommend_count") or 1) + 1
             supabase.table("shared_questions").update({"recommend_count": new_count}).eq("id", exist.data["id"]).execute()
         else:
-            # 不存在则新建
             supabase.table("shared_questions").insert({
                 "category": category, "question": q_data["question"], "options": q_data["options"],
                 "answer": q_data["answer"], "analysis": q_data["analysis"], "user_id": uid, "recommend_count": 1
@@ -77,39 +79,26 @@ def get_leaderboard_data():
         return res.data if res.data else []
     except: return []
 
-def get_community_selected(limit=15):
+def get_community_selected(limit=20):
     supabase = get_supabase()
     try:
-        # 按推荐数排序
         res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).limit(limit).execute()
         return res.data if res.data else []
     except: return []
 
-def get_public_mistakes_with_kills(limit=15):
-    """
-    v4.8 连斩逻辑：聚合全站错题记录并计数
-    """
+def get_public_mistakes_with_kills(limit=20):
     supabase = get_supabase()
     try:
-        # 这里使用 RPC 调用或直接在 Python 中处理（此处简单实现）
         res = supabase.table("answer_logs").select("question, category, analysis").eq("is_correct", False).execute()
         if not res.data: return []
-        
-        # 统计
         counts = {}
         processed = []
         for r in res.data:
             q = r['question']
             if q not in counts:
-                counts[q] = 1
-                processed.append(r)
-            else:
-                counts[q] += 1
-        
-        for p in processed:
-            p['kill_count'] = counts[p['question']]
-            
-        # 按连斩数排序
+                counts[q] = 1; processed.append(r)
+            else: counts[q] += 1
+        for p in processed: p['kill_count'] = counts[p['question']]
         return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
     except: return []
 
