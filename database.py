@@ -27,9 +27,31 @@ def sign_up_and_login(username, password, name, class_name):
     try:
         response = supabase.auth.sign_up({"email": email, "password": password})
         if response.user:
-            supabase.table("profiles").insert({"id": response.user.id, "name": name, "class_name": class_name, "account_name": username.lower()}).execute()
+            payload = {
+                "id": response.user.id, 
+                "name": name, 
+                "class_name": class_name, 
+                "account_name": username.lower()
+            }
+            # 动态适应降级引擎：如果 profiles 表缺列，自动剔除
+            for attempt in range(4):
+                try:
+                    supabase.table("profiles").insert(payload).execute()
+                    return response.user, None
+                except Exception as inner_e:
+                    err_str = str(inner_e)
+                    if 'PGRST204' in err_str:
+                        import re
+                        match = re.search(r"Could not find the '([^']+)' column", err_str)
+                        if match:
+                            bad_col = match.group(1)
+                            if bad_col in payload:
+                                del payload[bad_col]
+                                continue
+                    # 并非字段缺失引起的错误，直接抛出
+                    return None, err_str
             return response.user, None
-        return None, "注册失败"
+        return None, "注册失败：未返回用户信息"
     except Exception as e: return None, str(e)
 
 def get_profile(uid):
