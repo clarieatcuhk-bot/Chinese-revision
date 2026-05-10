@@ -22,12 +22,11 @@ st.set_page_config(page_title="Zhongkao-Navigator Pro v10.12", page_icon="💎",
 # --- UI 样式 (专门针对移动端优化间距和按钮宽度) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #f8fafc; }
     .page-header { background: linear-gradient(135deg, #0f172a, #3b82f6); color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
     .page-header h1 { font-size: 1.8rem; margin-bottom: 5px; }
     .kill-badge { background: #ef4444; color: white; padding: 3px 10px; border-radius: 12px; font-weight: bold; font-size: 0.8rem; margin-right: 8px; white-space: nowrap; }
     .admin-badge { background: #dc2626; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
-    .mistake-card { background: white; padding: 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
+    .mistake-card { background: var(--secondary-background-color); padding: 12px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--border-color); }
     .status-badge-done { background:#10b981; color:white; padding:2px 8px; border-radius:12px; font-size:0.8rem; vertical-align:middle; margin-right:8px; white-space: nowrap; }
     .status-badge-new { background:#f59e0b; color:white; padding:2px 8px; border-radius:12px; font-size:0.8rem; vertical-align:middle; margin-right:8px; white-space: nowrap; }
     /* 移动端优化：减少按钮边距，增强点击区 */
@@ -60,26 +59,24 @@ def main():
     else: app_shell()
 
 def show_auth():
-    c1, c2, c3 = st.columns([1, 1.2, 1])
-    with c2:
-        st.markdown("<h2 style='text-align:center;'>💎 语文导航 Pro</h2>", unsafe_allow_html=True)
-        t = st.tabs(["🔑 登录", "📝 注册"])
-        with t[0]:
-            u = st.text_input("账号 ID")
-            p = st.text_input("登录密码", type="password")
-            if st.button("进入系统", use_container_width=True):
-                res, err = sign_in(u.strip(), p)
-                if not err: st.session_state.user = res.user; st.rerun()
-                else: st.error(f"登录失败: {err}")
-        with t[1]:
-            ru = st.text_input("注册账号")
-            rp = st.text_input("设置密码", type="password")
-            rn = st.text_input("显示姓名")
-            rc = st.text_input("班级")
-            if st.button("立即加入", use_container_width=True):
-                user, err = sign_up_and_login(ru.strip(), rp, rn.strip(), rc.strip())
-                if not err: st.session_state.user = user; st.rerun()
-                else: st.error(f"注册失败: {err}")
+    st.markdown("<h2 style='text-align:center;'>💎 语文导航 Pro</h2>", unsafe_allow_html=True)
+    t = st.tabs(["🔑 登录", "📝 注册"])
+    with t[0]:
+        u = st.text_input("账号 ID")
+        p = st.text_input("登录密码", type="password")
+        if st.button("进入系统", use_container_width=True):
+            res, err = sign_in(u.strip(), p)
+            if not err: st.session_state.user = res.user; st.rerun()
+            else: st.error(f"登录失败: {err}")
+    with t[1]:
+        ru = st.text_input("注册账号")
+        rp = st.text_input("设置密码", type="password")
+        rn = st.text_input("显示姓名")
+        rc = st.text_input("班级")
+        if st.button("立即加入", use_container_width=True):
+            user, err = sign_up_and_login(ru.strip(), rp, rn.strip(), rc.strip())
+            if not err: st.session_state.user = user; st.rerun()
+            else: st.error(f"注册失败: {err}")
 
 def app_shell():
     user = st.session_state.user
