@@ -42,16 +42,18 @@ def get_profile(uid):
 def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent):
     supabase = get_supabase()
     try:
+        # 为了兼容性，增加 student_answer，且防御性取值
         supabase.table("answer_logs").insert({
             "user_id": uid, "category": category, 
             "question": q_obj.get('question', q_obj.get('question_text', '')), 
             "options": q_obj.get('options', {}), 
             "answer": q_obj.get('answer', ''), 
             "analysis": q_obj.get('analysis', ''),
+            "student_answer": student_answer,
             "is_correct": is_correct, "time_spent": time_spent
         }).execute()
     except Exception as e:
-        print(f"Log Error: {e}")
+        st.error(f"⚠️ 答题日志保存失败: {e}")
 
 def clear_user_mistakes(uid):
     supabase = get_supabase()
@@ -97,7 +99,7 @@ def normalize_text(text):
     if not text: return ""
     return re.sub(r'\s+', '', str(text).replace("<u>", "").replace("</u>", "").replace("*", ""))
 
-# --- 核心修复：乱码清洗与精准匹配 ---
+# --- 核心修复：释放全站错题同步限制 ---
 def get_public_mistakes_with_kills(limit=100):
     supabase = get_supabase()
     try:
@@ -105,42 +107,36 @@ def get_public_mistakes_with_kills(limit=100):
         res_logs = supabase.table("answer_logs").select("*").eq("is_correct", False).order('created_at', desc=True).limit(2000).execute()
         if not res_logs.data: return []
         
-        # 抓取当前所有精选题库
-        res_sh = supabase.table("shared_questions").select("*").execute()
-        if not res_sh.data: return []
-        
-        # 建立精选题库字典：使用 dict(s) 防止内存引用污染
-        sh_map = {normalize_text(s.get('question')): dict(s) for s in res_sh.data if s.get('question')}
-        
         counts = {}
         processed_map = {}
         
         for r in res_logs.data:
             q_raw = r.get('question') or r.get('question_text')
-            # 过滤空题、乱码题 (长度极短的视作垃圾数据)
-            if not q_raw or len(str(q_raw)) < 5: continue
             
-            q_norm = normalize_text(q_raw)
+            # 强化型防垃圾机制：去掉换行和空格后，字数低于10的视为空白乱码题
+            clean_str = normalize_text(q_raw)
+            if not clean_str or len(clean_str) < 10: 
+                continue
             
-            # 强制要求：只有存在于“精选题库”中的错题，才有资格进入全站错题流
-            if q_norm in sh_map:
-                std_text = sh_map[q_norm].get('question')
+            # 以纯净文本为去重主键，防止全角半角、换行等造成的无法聚合
+            if clean_str not in counts:
+                counts[clean_str] = 1
+                # 记录原始的数据结构，以供后续完美渲染
+                processed_map[clean_str] = r
+            else:
+                counts[clean_str] += 1
                 
-                if std_text not in counts:
-                    counts[std_text] = 1
-                    processed_map[std_text] = sh_map[q_norm]
-                else:
-                    counts[std_text] += 1
-                    
         final_list = []
-        for std_text, q_obj in processed_map.items():
-            q_obj['kill_count'] = counts[std_text]
-            final_list.append(q_obj)
+        for clean_str, q_obj in processed_map.items():
+            # 为了防止直接修改引起错误，生成一个全新的字典副本
+            final_obj = dict(q_obj)
+            final_obj['kill_count'] = counts[clean_str]
+            final_list.append(final_obj)
             
-        # 扩大容量，防止新的连斩为1的错题被挤出排行榜
+        # 按照 kill_count 倒序
         return sorted(final_list, key=lambda x: x['kill_count'], reverse=True)[:limit]
     except Exception as e:
-        print(f"Mistakes Error: {e}")
+        st.error(f"Mistakes Sync Error: {e}")
         return []
 
 def share_to_community(q_data, category, uid):
