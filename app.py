@@ -125,8 +125,11 @@ def refresh_q(targets):
         if random.random() < 0.2:
             res = get_random_shared_question()
             if res: res["from_community"] = True; st.session_state.current_q = res; return
-        # 调用 AI (此处使用 assets_db 示例)
-        res = generate_ai_question(None, "precise")
+            
+        # --- 修复：确保传入有效素材 ---
+        pool = assets_db.get('content', [])
+        items = random.sample(pool, 2) if pool else None
+        res = generate_ai_question(items, "precise")
         st.session_state.current_q = res
 
 def community_page():
