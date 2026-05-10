@@ -1,0 +1,21 @@
+# Streamlit 隐私文件
+.streamlit/secrets.toml
+
+# 环境变量
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 操作系统临时文件
+.DS_Store
+Thumbs.db
+
+# 开发工具缓存
+.ipynb_checkpoints/
+.vscode/
+
+# 注意：chinese_assets.json 和 chars_3500.json 是应用必需的素材，
+# 我们不再忽略所有 .json 文件，确保它们能被推送到 GitHub 供云端使用。
+# 如果你有包含私密信息的 json，请单独在此列出。
