@@ -12,7 +12,7 @@ from database import (
     get_user_all_logs, share_to_community, get_community_selected, 
     get_public_mistakes_with_kills, get_leaderboard_data, 
     clear_user_mistakes, delete_all_logs_of_question, delete_shared_question,
-    increment_challenge_stats
+    increment_challenge_stats, normalize_text
 )
 from ai_engine import generate_ai_question, evaluate_challenge
 
@@ -64,16 +64,18 @@ def show_auth():
             u = st.text_input("账号 ID")
             p = st.text_input("登录密码", type="password")
             if st.button("进入系统", use_container_width=True):
-                res, err = sign_in(u, p)
+                res, err = sign_in(u.strip(), p)
                 if not err: st.session_state.user = res.user; st.rerun()
+                else: st.error(f"登录失败: {err}")
         with t[1]:
             ru = st.text_input("注册账号")
             rp = st.text_input("设置密码", type="password")
             rn = st.text_input("显示姓名")
             rc = st.text_input("班级")
             if st.button("立即加入", use_container_width=True):
-                user, err = sign_up_and_login(ru, rp, rn, rc)
+                user, err = sign_up_and_login(ru.strip(), rp, rn.strip(), rc.strip())
                 if not err: st.session_state.user = user; st.rerun()
+                else: st.error(f"注册失败: {err}")
 
 def app_shell():
     user = st.session_state.user
@@ -117,6 +119,9 @@ def render_selected_questions(is_admin):
         st.info("目前没有精选题目")
         return
         
+    user_logs = get_user_all_logs(st.session_state.user.id)
+    done_texts = {normalize_text(log.get('question', '')) for log in user_logs if log.get('question')}
+        
     cats = sorted(list(set([q.get('category', '综合') for q in qs])))
     tabs = st.tabs(cats)
     
@@ -124,11 +129,15 @@ def render_selected_questions(is_admin):
         with tabs[i]:
             cat_qs = [q for q in qs if q.get('category', '综合') == cat]
             for q in cat_qs:
+                q_norm = normalize_text(q.get('question', ''))
+                is_done = q_norm in done_texts
+                status_badge = "<span style='background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:0.8rem;vertical-align:middle;margin-right:10px;'>✅ 已做</span>" if is_done else "<span style='background:#f59e0b;color:white;padding:2px 8px;border-radius:12px;font-size:0.8rem;vertical-align:middle;margin-right:10px;'>🆕 未做</span>"
+                
                 with st.container():
-                    st.markdown(f"### {format_html(q.get('question'))}", unsafe_allow_html=True)
+                    st.markdown(f"### {status_badge}{format_html(q.get('question'))}", unsafe_allow_html=True)
                     
                     c1, c2 = st.columns([1, 4])
-                    if c1.button("立即挑战", key=f"sel_v10_{q['id']}"):
+                    if c1.button("立即挑战" if not is_done else "再次挑战", key=f"sel_v10_{q['id']}"):
                         st.session_state.challenge_q = q; st.rerun()
                         
                     if is_admin:
