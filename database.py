@@ -39,40 +39,61 @@ def get_profile(uid):
         return res.data
     except: return None
 
-# --- 数据操作 ---
+# --- v9.5 强化型数据记录 ---
 def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent):
     supabase = get_supabase()
     try:
+        # 处理可能缺失的 pinyin_map 或 metadata
+        metadata = q_obj.get('metadata', {})
         supabase.table("answer_logs").insert({
-            "user_id": uid, "category": category, 
-            "question": q_obj['question'], "options": q_obj['options'], 
-            "answer": q_obj['answer'], "analysis": q_obj['analysis'],
-            "is_correct": is_correct, "time_spent": time_spent
+            "user_id": uid, 
+            "category": category, 
+            "question": q_obj['question'], 
+            "options": q_obj['options'], 
+            "answer": q_obj['answer'], 
+            "analysis": q_obj['analysis'],
+            "is_correct": is_correct, 
+            "time_spent": time_spent,
+            "metadata": metadata
         }).execute()
-    except: pass
+    except Exception as e:
+        print(f"Log Error (PGRST204 check): {e}")
 
-# --- v9.0 强化健壮性查询 ---
+def get_user_all_logs(uid):
+    supabase = get_supabase()
+    try:
+        # 使用 order 确保最新优先
+        res = supabase.table("answer_logs").select("*").eq("user_id", uid).order('created_at', desc=True).execute()
+        return res.data if res.data else []
+    except: return []
+
+def clear_user_mistakes(uid):
+    supabase = get_supabase()
+    try:
+        # 仅清空错题记录，保留正确记录作为画像参考
+        supabase.table("answer_logs").delete().eq("user_id", uid).eq("is_correct", False).execute()
+        return True
+    except: return False
+
+# --- 排名与广场逻辑保持 ---
 def get_leaderboard_data():
     supabase = get_supabase()
     try:
         res_rank = supabase.table("user_rankings").select("*").execute()
         res_prof = supabase.table("profiles").select("*").execute()
         if not res_rank.data: return []
-        prof_map = {p['id']: p for p in (res_prof.data or [])}
+        pm = {p['id']: p for p in (res_prof.data or [])}
         flat = []
         for r in res_rank.data:
-            # 防御性获取 ID：尝试 user_id 或 id
             uid = r.get('user_id') or r.get('id')
             if not uid: continue
-            p = prof_map.get(uid, {})
+            p = pm.get(uid, {})
             r['account_name'] = p.get('account_name', '')
             r['challenge_count'] = p.get('challenge_count', 0)
             r['challenge_success_count'] = p.get('challenge_success_count', 0)
             flat.append(r)
         return flat
-    except Exception as e:
-        print(f"Ranking Fetch Error: {e}")
-        return []
+    except: return []
 
 def get_public_mistakes_with_kills(limit=20):
     supabase = get_supabase()
@@ -81,10 +102,9 @@ def get_public_mistakes_with_kills(limit=20):
         if not res.data: return []
         counts = {}; processed = []; seen = set()
         for r in res.data:
-            q_text = str(r['question']).strip()
-            if q_text not in counts:
-                counts[q_text] = 1; processed.append(r); seen.add(q_text)
-            else: counts[q_text] += 1
+            q = str(r['question']).strip()
+            if q not in counts: counts[q] = 1; processed.append(r); seen.add(q)
+            else: counts[q] += 1
         for p in processed: p['kill_count'] = counts[str(p['question']).strip()]
         return sorted(processed, key=lambda x: x['kill_count'], reverse=True)[:limit]
     except: return []
@@ -103,13 +123,6 @@ def get_community_selected(limit=100):
     supabase = get_supabase()
     try:
         res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).limit(limit).execute()
-        return res.data if res.data else []
-    except: return []
-
-def get_user_all_logs(uid):
-    supabase = get_supabase()
-    try:
-        res = supabase.table("answer_logs").select("*").eq("user_id", uid).execute()
         return res.data if res.data else []
     except: return []
 
