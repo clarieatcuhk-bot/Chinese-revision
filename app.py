@@ -15,8 +15,8 @@ from database import (
 )
 from ai_engine import generate_ai_question
 
-# --- v8.6 全通路连接 & 挑战修复版 ---
-st.set_page_config(page_title="Zhongkao-Navigator Pro v8.6", page_icon="🛡️", layout="wide")
+# --- v8.7 全兼容 & 格式修正版 ---
+st.set_page_config(page_title="Zhongkao-Navigator Pro v8.7", page_icon="🛡️", layout="wide")
 
 # --- UI 样式 ---
 st.markdown("""
@@ -24,7 +24,7 @@ st.markdown("""
     .gold-medal { color: #d4af37 !important; font-weight: bold; font-size: 1.2rem; }
     .admin-badge { background-color: #dc2626; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
     .section-title { background: #1e3a8a; color: white; padding: 10px 20px; border-radius: 8px; margin: 20px 0; font-size: 1.2rem; }
-    .kill-badge { color: white; background: #ef4444; padding: 4px 10px; border-radius: 12px; font-weight: bold; }
+    .kill-badge { display: inline-block; background: #ef4444; color: white; padding: 2px 10px; border-radius: 15px; font-weight: bold; font-size: 0.85rem; margin-right: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -40,7 +40,7 @@ def main():
 def show_auth():
     c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
-        st.markdown("<h2 style='text-align:center;'>🛡️ 语文冲刺 Pro v8.6</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>🛡️ 语文冲刺 Pro v8.7</h2>", unsafe_allow_html=True)
         t = st.tabs(["🔑 登录", "📝 注册"])
         with t[0]:
             u = st.text_input("账号")
@@ -66,29 +66,25 @@ def app_body():
     with st.sidebar:
         st.markdown(f"### 👋 {profile['name']} " + ("<span class='admin-badge'>ADMIN</span>" if is_admin else ""), unsafe_allow_html=True)
         
-        # --- v8.6 导航逻辑修复：允许隐藏页面 ---
         base_pages = ["🏰 社区广场", "📊 能力画像"]
         if is_admin: base_pages.insert(0, "📖 专项训练")
         
-        # 判定当前位置
-        if st.session_state.current_page in base_pages:
-            nav_idx = base_pages.index(st.session_state.current_page)
-            # 只有在 radio 中明确选择时才切换
-            choice = st.radio("系统导航", base_pages, index=nav_idx)
+        # --- v8.7 导航逻辑：使用 Session State 锁死页面切换 ---
+        if st.session_state.current_page == "🎯 挑战模式":
+            st.info("🎯 正在进行挑战模式")
+            if st.button("⬅️ 退出挑战"):
+                st.session_state.current_page = "🏰 社区广场"
+                st.rerun()
+        else:
+            nav_idx = base_pages.index(st.session_state.current_page) if st.session_state.current_page in base_pages else 0
+            choice = st.radio("导航菜单", base_pages, index=nav_idx)
             if choice != st.session_state.current_page:
                 st.session_state.current_page = choice
                 st.rerun()
-        else:
-            # 当前处于隐藏页（如挑战模式），显示一个返回按钮或保持
-            if st.button("⬅️ 返回广场"):
-                st.session_state.current_page = "🏰 社区广场"
-                st.rerun()
-            st.info(f"📍 当前：{st.session_state.current_page}")
 
         st.divider()
         if st.button("退出登录"): st.session_state.user = None; st.rerun()
 
-    # 核心路由
     if st.session_state.current_page == "📖 专项训练": brush_page(is_admin)
     elif st.session_state.current_page == "🏰 社区广场": community_page(is_admin, acc)
     elif st.session_state.current_page == "🎯 挑战模式": challenge_mode(is_admin)
@@ -101,7 +97,7 @@ def brush_page(is_admin):
     q = st.session_state.current_q
     if q and "error" not in q:
         st.markdown(f"### {q['question']}")
-        ans = st.radio("选项预览：", ["A", "B", "C", "D"], format_func=lambda x: f"{x}. {q['options'].get(x, '...')}", key="q_prev", index=None)
+        ans = st.radio("预览作答：", ["A", "B", "C", "D"], format_func=lambda x: f"{x}. {q['options'].get(x, '...')}", key="q_prev", index=None)
         if ans:
             log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q, ans, (ans == q['answer']), 5.0)
             if st.button("👍 分享到广场"): share_to_community(q, q.get('category', '综合'), st.session_state.user.id); st.toast("分享成功")
@@ -114,7 +110,7 @@ def community_page(is_admin, current_acc):
     data = get_leaderboard_data()
     if data:
         df = pd.DataFrame(data); is_adm = lambda a: a == "zhoumingen" or (str(a).startswith('hongyi') and str(a)[6:].isdigit())
-        df_students = df[~df['account_name'].apply(is_adm)]
+        df_students = df[~df['account_name'].apply(is_adm)] if 'account_name' in df.columns else df
         
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -134,29 +130,25 @@ def community_page(is_admin, current_acc):
         r2c1, r2c2, r2c3, r2c4 = st.columns(4)
         with r2c1:
             st.markdown("#### ⚡ 速度王")
-            df_st_speed = df_students[df_students['total_questions'] >= 5]
-            if not df_st_speed.empty:
-                df_st_speed['speed'] = (df_st_speed['total_time'] / df_st_speed['total_questions']).round(1)
-                for i, r in df_st_speed.sort_values('speed').head(3).reset_index().iterrows():
-                    st.markdown(f"{i+1}. {r['name']} - {r['speed']}s")
+            df_v = df_students[df_students['total_questions'] >= 5]
+            if not df_v.empty:
+                df_v['v'] = (df_v['total_time'] / df_v['total_questions']).round(1)
+                for i, r in df_v.sort_values('v').head(3).reset_index().iterrows(): st.markdown(f"{i+1}. {r['name']} - {r['v']}s")
         with r2c2:
             st.markdown("#### ⏳ 专注王")
-            for i, r in df_students.sort_values('total_time', ascending=False).head(3).reset_index().iterrows():
-                st.markdown(f"{i+1}. {r['name']} - {(r['total_time']/60):.1f}min")
+            for i, r in df_students.sort_values('total_time', ascending=False).head(3).reset_index().iterrows(): st.markdown(f"{i+1}. {r['name']} - {(r['total_time']/60):.1f}m")
         with r2c3:
             st.markdown("#### 🚩 质疑王")
-            for i, r in df_students.sort_values('challenge_count', ascending=False).head(3).reset_index().iterrows():
-                st.markdown(f"{i+1}. {r['name']} - {r['challenge_count']}次")
+            for i, r in df_students.sort_values('challenge_count', ascending=False).head(3).reset_index().iterrows(): st.markdown(f"{i+1}. {r['name']} - {r['challenge_count']}次")
         with r2c4:
             st.markdown("#### 🏆 判官王")
-            for i, r in df_students.sort_values('challenge_success_count', ascending=False).head(3).reset_index().iterrows():
-                st.markdown(f"{i+1}. {r['name']} - {r['challenge_success_count']}次")
+            for i, r in df_students.sort_values('challenge_success_count', ascending=False).head(3).reset_index().iterrows(): st.markdown(f"{i+1}. {r['name']} - {r['challenge_success_count']}次")
 
     st.markdown("<div class='section-title'>🌟 老师精选题库</div>", unsafe_allow_html=True)
     qs = get_community_selected()
     if qs:
         for q in qs:
-            with st.expander(f"📌 【{q['category']}】 {q['question'][:30]}..."):
+            with st.expander(f"📌 【{q['category']}】 {q['question'][:40]}..."):
                 st.write(q['question'])
                 if st.button("立即挑战", key=f"sq_{q['id']}"):
                     st.session_state.current_q = q; st.session_state.current_page = "🎯 挑战模式"; st.rerun()
@@ -164,8 +156,9 @@ def community_page(is_admin, current_acc):
     st.markdown("<div class='section-title'>🚩 全站连斩错题流</div>", unsafe_allow_html=True)
     mistakes = get_public_mistakes_with_kills()
     for m in mistakes:
-        st.error(f"<span class='kill-badge'>⚔️ 连斩 {m['kill_count']} 人</span> | {m['question']}")
-        if st.button("终结连斩", key=f"k_{m['question'][:20]}_{random.random()}"):
+        # --- v8.7 使用 markdown 渲染勋章 ---
+        st.markdown(f"<span class='kill-badge'>⚔️ 连斩 {m['kill_count']} 人</span> {m['question']}", unsafe_allow_html=True)
+        if st.button("终结连斩", key=f"k_{random.random()}"):
             st.session_state.current_q = m; st.session_state.current_page = "🎯 挑战模式"; st.rerun()
 
 def challenge_mode(is_admin):
@@ -174,40 +167,31 @@ def challenge_mode(is_admin):
     if q:
         st.markdown(f"### {q['question']}")
         opts = q.get('options', {})
-        ans = st.radio("你的回答：", ["A", "B", "C", "D"], format_func=lambda x: f"{x}. {opts.get(x, '...')}", key="chal")
+        ans = st.radio("回答：", ["A", "B", "C", "D"], format_func=lambda x: f"{x}. {opts.get(x, '...')}", key="chal", index=None)
         if ans:
-            log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q, ans, (ans == q['answer']), 5.0)
+            is_correct = (ans == q['answer'])
+            log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q, ans, is_correct, 5.0)
             st.info(f"解析：{q['analysis']}")
-            if st.button("返回广场"): 
-                st.session_state.current_page = "🏰 社区广场"
-                st.rerun()
+            if st.button("返回广场"): st.session_state.current_page = "🏰 社区广场"; st.rerun()
 
 def dashboard_page():
-    st.header("📊 能力全景画像")
+    st.header("📊 能力画像")
     logs = get_user_all_logs(st.session_state.user.id)
     df = pd.DataFrame(logs) if logs else pd.DataFrame(columns=['created_at', 'is_correct', 'category', 'question', 'answer', 'analysis'])
-    
-    st.subheader("⏱️ 10 分钟波动图")
+    if st.button("📥 导出错题诊断手册 (Markdown)", use_container_width=True):
+        wr = df[~df['is_correct']]
+        if not wr.empty:
+            md = "# 🛡️ 错题手册\n\n"
+            for _, r in wr.iterrows(): md += f"### {r['question']}\n- ❌ 错误: {r['answer']}\n- 💡 解析: {r.get('analysis', '无')}\n\n"
+            st.download_button("点击下载", md, file_name="Mistakes.md")
+    st.subheader("⏱️ 波动图")
     if not df.empty:
         df['created_at'] = pd.to_datetime(df['created_at']).dt.tz_convert('Asia/Shanghai')
-        bin_stats = df.groupby(df['created_at'].dt.floor('10min'))['is_correct'].mean().reset_index()
-        st.plotly_chart(px.line(bin_stats, x='created_at', y='is_correct', markers=True), use_container_width=True)
-    
-    st.subheader("🏹 五轴能力分布")
-    fixed_axes = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础"]
-    stats = df.groupby('category')['is_correct'].mean().to_dict() if not df.empty else {}
-    radar_values = [stats.get(ax, 0) * 100 for ax in fixed_axes]
-    st.plotly_chart(go.Figure(data=go.Scatterpolar(r=radar_values, theta=fixed_axes, fill='toself')), use_container_width=True)
-
-    # --- v8.6 导出按钮回归 ---
-    if st.button("📥 导出全量错题诊断手册 (Markdown)", use_container_width=True):
-        wrongs = df[~df['is_correct']]
-        if not wrongs.empty:
-            md = "# 🛡️ 错题诊疗手册\n\n"
-            for _, r in wrongs.iterrows():
-                md += f"### {r['question']}\n- ❌ 错误: {r['answer']}\n- 💡 解析: {r.get('analysis', '无')}\n\n"
-            st.download_button("点击下载", md, file_name="My_Mistakes.md")
-        else: st.toast("暂无错题可导出")
+        st.plotly_chart(px.line(df.groupby(df['created_at'].dt.floor('10min'))['is_correct'].mean().reset_index(), x='created_at', y='is_correct', markers=True), use_container_width=True)
+    st.subheader("🏹 雷达图")
+    ax = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础"]
+    st = df.groupby('category')['is_correct'].mean().to_dict() if not df.empty else {}
+    st.plotly_chart(go.Figure(data=go.Scatterpolar(r=[st.get(a, 0)*100 for a in ax], theta=ax, fill='toself')), use_container_width=True)
 
 if __name__ == "__main__":
     main()

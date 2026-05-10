@@ -27,8 +27,7 @@ def sign_up_and_login(username, password, name, class_name):
     try:
         response = supabase.auth.sign_up({"email": email, "password": password})
         if response.user:
-            acc_name = username.lower()
-            supabase.table("profiles").insert({"id": response.user.id, "name": name, "class_name": class_name, "account_name": acc_name}).execute()
+            supabase.table("profiles").insert({"id": response.user.id, "name": name, "class_name": class_name}).execute()
             return response.user, None
         return None, "注册失败"
     except Exception as e: return None, str(e)
@@ -52,14 +51,13 @@ def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent
         }).execute()
     except: pass
 
-# --- v8.6 修复排行榜 Join 报错 (采用内存聚合) ---
+# --- v8.7 究极容错查询 ---
 def get_leaderboard_data():
     supabase = get_supabase()
     try:
-        # 1. 抓取排名基础数据 (来自 View)
         res_rank = supabase.table("user_rankings").select("*").execute()
-        # 2. 抓取用户档案数据 (来自 Table)
-        res_prof = supabase.table("profiles").select("id, account_name, challenge_count, challenge_success_count").execute()
+        # 不再指定列名，直接选 * 避免报错
+        res_prof = supabase.table("profiles").select("*").execute()
         
         if not res_rank.data: return []
         
@@ -67,13 +65,13 @@ def get_leaderboard_data():
         flat = []
         for r in res_rank.data:
             p = prof_map.get(r['user_id'], {})
-            r['account_name'] = p.get('account_name', '')
+            r['account_name'] = p.get('account_name', '') # 动态获取
             r['challenge_count'] = p.get('challenge_count', 0)
             r['challenge_success_count'] = p.get('challenge_success_count', 0)
             flat.append(r)
         return flat
     except Exception as e:
-        st.error(f"聚合排行榜数据失败: {e}")
+        st.error(f"排行榜抓取失败: {e}")
         return []
 
 def get_public_mistakes_with_kills(limit=20):
