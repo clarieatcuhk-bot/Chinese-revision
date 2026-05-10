@@ -15,15 +15,16 @@ from database import (
 )
 from ai_engine import generate_ai_question
 
-# --- v8.5 重火力·全量回归版 ---
-st.set_page_config(page_title="Zhongkao-Navigator Pro v8.5", page_icon="🏆", layout="wide")
+# --- v8.6 全通路连接 & 挑战修复版 ---
+st.set_page_config(page_title="Zhongkao-Navigator Pro v8.6", page_icon="🛡️", layout="wide")
 
 # --- UI 样式 ---
 st.markdown("""
 <style>
-    .gold-medal { color: #d4af37 !important; font-weight: bold !important; font-size: 1.2rem; }
+    .gold-medal { color: #d4af37 !important; font-weight: bold; font-size: 1.2rem; }
     .admin-badge { background-color: #dc2626; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
     .section-title { background: #1e3a8a; color: white; padding: 10px 20px; border-radius: 8px; margin: 20px 0; font-size: 1.2rem; }
+    .kill-badge { color: white; background: #ef4444; padding: 4px 10px; border-radius: 12px; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -39,7 +40,7 @@ def main():
 def show_auth():
     c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
-        st.markdown("<h2 style='text-align:center;'>🏆 语文冲刺 Pro v8.5</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>🛡️ 语文冲刺 Pro v8.6</h2>", unsafe_allow_html=True)
         t = st.tabs(["🔑 登录", "📝 注册"])
         with t[0]:
             u = st.text_input("账号")
@@ -64,11 +65,30 @@ def app_body():
     
     with st.sidebar:
         st.markdown(f"### 👋 {profile['name']} " + ("<span class='admin-badge'>ADMIN</span>" if is_admin else ""), unsafe_allow_html=True)
-        pages = ["🏰 社区广场", "📊 能力画像"]
-        if is_admin: pages.insert(0, "📖 专项训练")
-        st.session_state.current_page = st.radio("系统导航", pages, index=pages.index(st.session_state.current_page) if st.session_state.current_page in pages else 0)
-        if st.button("登出"): st.session_state.user = None; st.rerun()
+        
+        # --- v8.6 导航逻辑修复：允许隐藏页面 ---
+        base_pages = ["🏰 社区广场", "📊 能力画像"]
+        if is_admin: base_pages.insert(0, "📖 专项训练")
+        
+        # 判定当前位置
+        if st.session_state.current_page in base_pages:
+            nav_idx = base_pages.index(st.session_state.current_page)
+            # 只有在 radio 中明确选择时才切换
+            choice = st.radio("系统导航", base_pages, index=nav_idx)
+            if choice != st.session_state.current_page:
+                st.session_state.current_page = choice
+                st.rerun()
+        else:
+            # 当前处于隐藏页（如挑战模式），显示一个返回按钮或保持
+            if st.button("⬅️ 返回广场"):
+                st.session_state.current_page = "🏰 社区广场"
+                st.rerun()
+            st.info(f"📍 当前：{st.session_state.current_page}")
 
+        st.divider()
+        if st.button("退出登录"): st.session_state.user = None; st.rerun()
+
+    # 核心路由
     if st.session_state.current_page == "📖 专项训练": brush_page(is_admin)
     elif st.session_state.current_page == "🏰 社区广场": community_page(is_admin, acc)
     elif st.session_state.current_page == "🎯 挑战模式": challenge_mode(is_admin)
@@ -87,7 +107,7 @@ def brush_page(is_admin):
             if st.button("👍 分享到广场"): share_to_community(q, q.get('category', '综合'), st.session_state.user.id); st.toast("分享成功")
 
 def refresh_q():
-    st.session_state.current_q = generate_ai_question(None, "precise", "字音辨析")
+    st.session_state.current_q = generate_ai_question(None, "precise", "综合")
 
 def community_page(is_admin, current_acc):
     st.markdown("<div class='section-title'>🏆 七维荣耀金榜</div>", unsafe_allow_html=True)
@@ -136,46 +156,58 @@ def community_page(is_admin, current_acc):
     qs = get_community_selected()
     if qs:
         for q in qs:
-            with st.expander(f"📌 【{q['category']}】 {q['question'][:40]}..."):
+            with st.expander(f"📌 【{q['category']}】 {q['question'][:30]}..."):
                 st.write(q['question'])
                 if st.button("立即挑战", key=f"sq_{q['id']}"):
                     st.session_state.current_q = q; st.session_state.current_page = "🎯 挑战模式"; st.rerun()
 
-    st.markdown("<div class='section-title'>🚩 全站连斩错题流 (暴力实时)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>🚩 全站连斩错题流</div>", unsafe_allow_html=True)
     mistakes = get_public_mistakes_with_kills()
     for m in mistakes:
-        st.error(f"⚔️ 连斩 {m['kill_count']} 人 | {m['question']}")
+        st.error(f"<span class='kill-badge'>⚔️ 连斩 {m['kill_count']} 人</span> | {m['question']}")
         if st.button("终结连斩", key=f"k_{m['question'][:20]}_{random.random()}"):
             st.session_state.current_q = m; st.session_state.current_page = "🎯 挑战模式"; st.rerun()
 
 def challenge_mode(is_admin):
-    st.header("🎯 正在挑战")
+    st.header("🎯 社区挑战模式")
     q = st.session_state.current_q
     if q:
         st.markdown(f"### {q['question']}")
-        ans = st.radio("你的回答：", ["A", "B", "C", "D"], format_func=lambda x: f"{x}. {q.get('options', {}).get(x, '...')}", key="chal")
+        opts = q.get('options', {})
+        ans = st.radio("你的回答：", ["A", "B", "C", "D"], format_func=lambda x: f"{x}. {opts.get(x, '...')}", key="chal")
         if ans:
             log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q, ans, (ans == q['answer']), 5.0)
             st.info(f"解析：{q['analysis']}")
-            if st.button("返回广场"): st.session_state.current_page = "🏰 社区广场"; st.rerun()
+            if st.button("返回广场"): 
+                st.session_state.current_page = "🏰 社区广场"
+                st.rerun()
 
 def dashboard_page():
-    st.header("📊 能力画像")
+    st.header("📊 能力全景画像")
     logs = get_user_all_logs(st.session_state.user.id)
-    df = pd.DataFrame(logs) if logs else pd.DataFrame(columns=['created_at', 'is_correct', 'category'])
+    df = pd.DataFrame(logs) if logs else pd.DataFrame(columns=['created_at', 'is_correct', 'category', 'question', 'answer', 'analysis'])
     
     st.subheader("⏱️ 10 分钟波动图")
     if not df.empty:
         df['created_at'] = pd.to_datetime(df['created_at']).dt.tz_convert('Asia/Shanghai')
         bin_stats = df.groupby(df['created_at'].dt.floor('10min'))['is_correct'].mean().reset_index()
         st.plotly_chart(px.line(bin_stats, x='created_at', y='is_correct', markers=True), use_container_width=True)
-    else: st.plotly_chart(px.line(title="暂无数据"), use_container_width=True)
-
-    st.subheader("🏹 五轴能力罗盘")
+    
+    st.subheader("🏹 五轴能力分布")
     fixed_axes = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础"]
     stats = df.groupby('category')['is_correct'].mean().to_dict() if not df.empty else {}
     radar_values = [stats.get(ax, 0) * 100 for ax in fixed_axes]
     st.plotly_chart(go.Figure(data=go.Scatterpolar(r=radar_values, theta=fixed_axes, fill='toself')), use_container_width=True)
+
+    # --- v8.6 导出按钮回归 ---
+    if st.button("📥 导出全量错题诊断手册 (Markdown)", use_container_width=True):
+        wrongs = df[~df['is_correct']]
+        if not wrongs.empty:
+            md = "# 🛡️ 错题诊疗手册\n\n"
+            for _, r in wrongs.iterrows():
+                md += f"### {r['question']}\n- ❌ 错误: {r['answer']}\n- 💡 解析: {r.get('analysis', '无')}\n\n"
+            st.download_button("点击下载", md, file_name="My_Mistakes.md")
+        else: st.toast("暂无错题可导出")
 
 if __name__ == "__main__":
     main()
