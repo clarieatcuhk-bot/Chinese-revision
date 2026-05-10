@@ -103,8 +103,12 @@ def app_body():
     user = st.session_state.user
     profile = get_profile(user.id)
     
+    # --- 防御性逻辑：防止 profile 为 None 导致崩溃 ---
+    if not profile:
+        profile = {"name": "新同学", "class_name": "待完善"}
+    
     with st.sidebar:
-        st.markdown(f"### 👤 {profile.get('name', '同学')}")
+        st.markdown(f"### 👤 {profile.get('name', '新同学')}")
         st.caption(f"📍 {profile.get('class_name', '基础班')}")
         st.divider()
         page = st.radio("功能模块", ["📖 专项刷题", "🏰 社区广场", "📊 学习画像 2.0"])
