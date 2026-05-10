@@ -119,41 +119,54 @@ def normalize_text(text):
     if not text: return ""
     return re.sub(r'\s+', '', str(text).replace("<u>", "").replace("</u>", "").replace("*", ""))
 
-# --- 核心修复：释放全站错题同步限制 ---
+# --- 核心修复：智能补全与释放同步限制 ---
 def get_public_mistakes_with_kills(limit=100):
     supabase = get_supabase()
     try:
-        # 抓取大量日志以保证新鲜度
+        # 1. 抓取答题日志
         res_logs = supabase.table("answer_logs").select("*").eq("is_correct", False).order('created_at', desc=True).limit(2000).execute()
         if not res_logs.data: return []
+        
+        # 2. 抓取精选题库，用于“智能补全”
+        res_sh = supabase.table("shared_questions").select("*").execute()
+        sh_map = {}
+        if res_sh.data:
+            sh_map = {normalize_text(s.get('question')): dict(s) for s in res_sh.data if s.get('question')}
         
         counts = {}
         processed_map = {}
         
         for r in res_logs.data:
             q_raw = r.get('question') or r.get('question_text')
-            
-            # 强化型防垃圾机制：去掉换行和空格后，字数低于10的视为空白乱码题
             clean_str = normalize_text(q_raw)
+            
             if not clean_str or len(clean_str) < 10: 
                 continue
             
-            # 以纯净文本为去重主键，防止全角半角、换行等造成的无法聚合
+            # 核心修复：如果数据库因为缺列而丢弃了 options，我们从精选题库里把它“借”回来
+            if clean_str in sh_map:
+                std_q = sh_map[clean_str]
+                if not r.get('options') or r.get('options') == {}:
+                    r['options'] = std_q.get('options', {})
+                if not r.get('answer'):
+                    r['answer'] = std_q.get('answer', '')
+                if not r.get('analysis'):
+                    r['analysis'] = std_q.get('analysis', '')
+                # 顺便把带富文本格式的完美题干借过来
+                r['question'] = std_q.get('question', q_raw)
+            
             if clean_str not in counts:
                 counts[clean_str] = 1
-                # 记录原始的数据结构，以供后续完美渲染
                 processed_map[clean_str] = r
             else:
                 counts[clean_str] += 1
                 
         final_list = []
         for clean_str, q_obj in processed_map.items():
-            # 为了防止直接修改引起错误，生成一个全新的字典副本
             final_obj = dict(q_obj)
             final_obj['kill_count'] = counts[clean_str]
             final_list.append(final_obj)
             
-        # 按照 kill_count 倒序
         return sorted(final_list, key=lambda x: x['kill_count'], reverse=True)[:limit]
     except Exception as e:
         st.error(f"Mistakes Sync Error: {e}")
