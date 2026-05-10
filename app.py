@@ -15,18 +15,26 @@ from database import (
 )
 from ai_engine import generate_ai_question, sanitize_question
 
-# --- v3.9 交互优化版 ---
-st.set_page_config(page_title="Zhongkao-Navigator v3.9", page_icon="🎯", layout="wide")
+# --- v3.9.1 稳定性补丁版 ---
+st.set_page_config(page_title="Zhongkao-Navigator v3.9.1", page_icon="🎯", layout="wide")
+
+# --- 素材加载 (全局变量) ---
+@st.cache_data
+def load_all_data():
+    try:
+        with open("chinese_assets.json", "r", encoding="utf-8") as f: a = json.load(f)
+        with open("chars_3500.json", "r", encoding="utf-8") as f: c = json.load(f)
+        return a, c
+    except:
+        return {"content": []}, {"chars": []}
+
+# 明确初始化全局变量
+assets_db, chars_lib = load_all_data()
 
 # --- 增强渲染逻辑 ---
 def format_display_text(text):
-    """
-    将 AI 生成的标注统一转化为【括号加粗】形式，解决打点费力或不清晰的问题
-    """
     if not text: return ""
-    # 兼容 <u> 标签转化为 【 】
     text = text.replace("<u>", " **【").replace("</u>", "】** ")
-    # 确保原本的括号也加粗
     text = text.replace("（", " **（").replace("）", "）** ")
     return text
 
@@ -44,7 +52,7 @@ def main():
 def show_auth():
     c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
-        st.markdown("<h2 style='text-align:center;'>🛡️ 语文冲刺·交互增强版</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>🛡️ 语文冲刺·荣耀版</h2>", unsafe_allow_html=True)
         t1, t2 = st.tabs(["🔑 登录", "📝 注册"])
         with t1:
             u = st.text_input("用户名", key="l_u")
@@ -54,7 +62,7 @@ def show_auth():
                 if not err: st.session_state.user = res.user; st.rerun()
         with t2:
             ru = st.text_input("用户名", key="r_u")
-            rp = st.text_input("设置密码", type="password", key="r_p")
+            rp = st.text_input("密码", type="password", key="r_p")
             rn = st.text_input("姓名", key="r_n")
             rc = st.text_input("班级", key="r_c")
             if st.button("立即开通", use_container_width=True):
@@ -65,16 +73,13 @@ def app_body():
     user = st.session_state.user
     profile = get_profile(user.id) or {"name": "新同学", "class_name": "备考中"}
     
-    # 侧边栏导航改用 session_state 同步
     with st.sidebar:
         st.title(f"👋 {profile['name']}")
         st.divider()
-        # 注意：这里我们手动控制 radio 的 index 来实现页面跳转
         pages = ["📖 专项练习", "🏰 社区广场", "📊 深度画像"]
         idx = pages.index(st.session_state.current_page) if st.session_state.current_page in pages else 0
         page = st.radio("功能导航", pages, index=idx)
-        st.session_state.current_page = page # 同步回状态
-        
+        st.session_state.current_page = page
         if st.button("注销退出"): st.session_state.user = None; st.rerun()
 
     if st.session_state.current_page == "📖 专项练习": brush_page()
@@ -84,7 +89,6 @@ def app_body():
 def brush_page():
     st.header("考点精准挑战")
     targets = st.multiselect("🎯 锁定范围：", ["字音辨析", "字形纠错", "成语运用", "病句诊断", "3500字基础", "3500字进阶"])
-    
     c1, c2 = st.columns([4, 1])
     with c2:
         if st.button("✨ 换一题", use_container_width=True) or st.session_state.current_q is None:
@@ -93,40 +97,36 @@ def brush_page():
 
     q = st.session_state.current_q
     if q and "error" not in q:
-        # 统一标注格式渲染
         q_text = format_display_text(q['question'])
         st.markdown(f"### {q_text}", unsafe_allow_html=True)
-        
         ans = st.radio("你的答案：", ["A", "B", "C", "D"], 
                        format_func=lambda x: f"{x}. {q['options'].get(x, '...')}", 
                        key=st.session_state.question_id, index=None, disabled=st.session_state.answered)
         
         if ans and not st.session_state.answered:
             st.session_state.answered = True
-            time_spent = time.time() - st.session_state.start_time
             is_correct = (ans == q['answer'])
-            log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q['question'], ans, is_correct, time_spent, q['analysis'])
+            log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q['question'], ans, is_correct, 0, q['analysis'])
             if is_correct: st.success("🎉 正确！"); st.balloons()
-            else: st.error(f"❌ 错误。正确答案是：{q['answer']}")
+            else: st.error(f"❌ 错误。答案是：{q['answer']}")
 
         if st.session_state.answered:
             st.info(f"💡 解析：{q['analysis']}")
-            if st.button("👍 觉得不错，分享到广场"):
-                if share_to_community(q, q.get('category', '综合'), st.session_state.user.id):
-                    st.toast("分享成功！")
+            if st.button("👍 分享到广场"):
+                share_to_community(q, q.get('category', '综合'), st.session_state.user.id)
+                st.toast("分享成功！")
             if st.button("继续刷题 ➡️"): refresh_q(targets); st.rerun()
 
 def refresh_q(targets):
     st.session_state.answered = False
     st.session_state.question_id = str(uuid.uuid4())
     st.session_state.start_time = time.time()
-    with st.spinner("AI 实验室正在出题..."):
-        # 混合抽题逻辑
+    with st.spinner("AI 出题中..."):
         if random.random() < 0.2:
             res = get_random_shared_question()
             if res: res["from_community"] = True; st.session_state.current_q = res; return
-            
-        # --- 修复：确保传入有效素材 ---
+        
+        # 使用全局变量 assets_db
         pool = assets_db.get('content', [])
         items = random.sample(pool, 2) if pool else None
         res = generate_ai_question(items, "precise")
@@ -135,24 +135,20 @@ def refresh_q(targets):
 def community_page():
     st.header("🏰 社区共享广场")
     t1, t2, t3 = st.tabs(["📊 荣誉排行榜", "🌟 精选题库", "🚩 全站错题流"])
-    
     with t1:
         data = get_leaderboard_data()
         if data:
             ldf = pd.DataFrame(data).sort_values('correct_questions', ascending=False)
             st.dataframe(ldf[['name', 'class_name', 'correct_questions', 'total_questions', 'contributions']], use_container_width=True)
-
     with t2:
         for q in get_community_selected():
-            with st.expander(f"【{q['category']}】 {q['question'][:40]}..."):
+            with st.expander(f"【{q['category']}】 {q['question'][:30]}..."):
                 st.markdown(format_display_text(q['question']))
-                # 修复挑战按钮：点击后修改页面状态并跳转
-                if st.button(f"立即挑战此题", key=f"q_{q['id']}"):
+                if st.button(f"立即挑战", key=f"q_{q['id']}"):
                     st.session_state.current_q = q
                     st.session_state.answered = False
-                    st.session_state.current_page = "📖 专项练习" # 强制跳转
+                    st.session_state.current_page = "📖 专项练习"
                     st.rerun()
-
     with t3:
         for m in get_public_mistakes():
             st.error(f"**[{m['category']}]** {format_display_text(m['question'])}")
@@ -162,7 +158,6 @@ def dashboard_page():
     logs = get_user_all_logs(st.session_state.user.id)
     if logs:
         df = pd.DataFrame(logs)
-        # 雷达图逻辑保持...
         radar_df = df.groupby('category')['is_correct'].mean().reset_index()
         fig = px.line_polar(radar_df, r='is_correct', theta='category', line_close=True)
         st.plotly_chart(fig, use_container_width=True)
