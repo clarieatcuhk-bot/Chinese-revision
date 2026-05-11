@@ -368,6 +368,17 @@ def render_mistake_stream(is_admin):
     if state_key not in st.session_state:
         st.session_state[state_key] = False
         
+    st.markdown(f"<div class='mistake-card'><h4 style='line-height:1.5;margin-bottom:15px;'>{format_html(q_text)}</h4></div>", unsafe_allow_html=True)
+    
+    if not opts:
+        st.error("⚠️ 本题的底层选项数据因旧版题库重置已永久失效。")
+        if st.button("🧹 彻底清除此失效错题", key=f"clear_bad_{q['id']}", use_container_width=True):
+            from db_core import get_supabase
+            get_supabase().table("answer_logs").delete().eq("id", q['id']).execute()
+            st.session_state.review_queue.pop(0)
+            st.rerun()
+        return
+
     ph_ans = st.empty()
     ans = ph_ans.radio("重选答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key=f"redo_rad_{q['id']}", disabled=st.session_state[state_key], index=None)
     st.write("")
