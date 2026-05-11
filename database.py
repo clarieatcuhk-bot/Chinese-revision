@@ -61,41 +61,44 @@ def get_profile(uid):
         return res.data
     except: return None
 
+import threading
+
 def log_quiz_result(uid, category, q_obj, student_answer, is_correct, time_spent):
-    supabase = get_supabase()
-    
-    # 准备最全的数据载荷
-    payload = {
-        "user_id": uid, 
-        "category": category, 
-        "question": q_obj.get('question', q_obj.get('question_text', '')), 
-        "options": q_obj.get('options', {}), 
-        "answer": q_obj.get('answer', ''), 
-        "analysis": q_obj.get('analysis', ''),
-        "student_answer": student_answer,
-        "is_correct": is_correct, 
-        "time_spent": time_spent
-    }
-    
-    # 动态适应降级引擎：如果你的数据库表缺少某些最新字段，它会自动剔除并重试
-    for attempt in range(4):
+    def _task():
         try:
-            supabase.table("answer_logs").insert(payload).execute()
-            return # 插入成功
+            supabase = get_supabase()
+            payload = {
+                "user_id": uid, 
+                "category": category, 
+                "question": q_obj.get('question', q_obj.get('question_text', '')), 
+                "options": q_obj.get('options', {}), 
+                "answer": q_obj.get('answer', ''), 
+                "analysis": q_obj.get('analysis', ''),
+                "student_answer": student_answer,
+                "is_correct": is_correct, 
+                "time_spent": time_spent
+            }
+            
+            for attempt in range(4):
+                try:
+                    supabase.table("answer_logs").insert(payload).execute()
+                    return 
+                except Exception as e:
+                    err_str = str(e)
+                    if 'PGRST204' in err_str:
+                        import re
+                        match = re.search(r"Could not find the '([^']+)' column", err_str)
+                        if match:
+                            bad_col = match.group(1)
+                            if bad_col in payload:
+                                del payload[bad_col]
+                                continue
+                    break
         except Exception as e:
-            err_str = str(e)
-            if 'PGRST204' in err_str:
-                # 解析报错信息，找到缺失的列名 (例如 'options' 或 'student_answer')
-                import re
-                match = re.search(r"Could not find the '([^']+)' column", err_str)
-                if match:
-                    bad_col = match.group(1)
-                    if bad_col in payload:
-                        del payload[bad_col] # 删掉数据库里没有的字段
-                        continue # 再试一次
-            # 如果不是字段缺失问题，或者正则没匹配到，就真正抛出错误
-            st.error(f"⚠️ 答题日志保存失败: {err_str}")
-            break
+            print(f"Async log error: {e}")
+            
+    # 后台异步执行入库，彻底解放主界面的渲染阻塞
+    threading.Thread(target=_task, daemon=True).start()
 
 def clear_user_mistakes(uid):
     supabase = get_supabase()

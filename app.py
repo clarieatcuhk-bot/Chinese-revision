@@ -88,7 +88,7 @@ def app_shell():
     
     with st.sidebar:
         st.markdown(f"### 👋 {profile['name']} " + ("<span class='admin-badge'>ADMIN</span>" if is_admin else ""), unsafe_allow_html=True)
-        menu = ["🌟 精选题库", "🚩 错题挑战", "🏆 荣耀金榜", "📊 个人画像"]
+        menu = ["🌟 精选题库", "🚩 错题挑战", "⚡ 极速特训", "🏆 荣耀金榜", "📊 个人画像"]
         if is_admin: menu.insert(0, "📖 命题实验室")
         
         if st.session_state.challenge_q or st.session_state.redo_q:
@@ -109,6 +109,7 @@ def app_shell():
     else:
         if active_tab == "🌟 精选题库": render_selected_questions(is_admin)
         elif active_tab == "🚩 错题挑战": render_mistake_stream(is_admin)
+        elif active_tab == "⚡ 极速特训": render_fast_training()
         elif active_tab == "🏆 荣耀金榜": render_leaderboard(is_admin)
         elif active_tab == "📊 个人画像": render_personal_dashboard()
         elif active_tab == "📖 命题实验室": render_admin_lab()
@@ -317,6 +318,95 @@ def render_admin_lab():
         if c2.button("🗑️ 废弃此题"):
             st.session_state.lab_q = None
             st.rerun()
+
+def render_fast_training():
+    st.markdown("<div class='page-header'><h1>⚡ 极速特训</h1><p>智能出题引擎，零延迟连刷体验</p></div>", unsafe_allow_html=True)
+    
+    cats = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础", "文学常识与传统文化"]
+    sel_cat = st.selectbox("🎯 选择特训考点：", cats)
+    
+    if 'fast_queue' not in st.session_state: st.session_state.fast_queue = []
+    if 'is_fetching' not in st.session_state: st.session_state.is_fetching = False
+    if 'fast_q_cat' not in st.session_state: st.session_state.fast_q_cat = sel_cat
+    if 'current_fast_q' not in st.session_state: st.session_state.current_fast_q = None
+    
+    # 切换科目时清空缓冲池
+    if st.session_state.fast_q_cat != sel_cat:
+        st.session_state.fast_queue = []
+        st.session_state.fast_q_cat = sel_cat
+        st.session_state.current_fast_q = None
+        
+    # 后台智能预充 (保持至少 2 题在缓存池)
+    if len(st.session_state.fast_queue) < 2 and not st.session_state.is_fetching:
+        st.session_state.is_fetching = True
+        
+        def bg_fetch_ai(category):
+            try:
+                q = generate_ai_question(None, "precise", category)
+                if q and "error" not in q:
+                    st.session_state.fast_queue.append(q)
+            except: pass
+            finally:
+                st.session_state.is_fetching = False
+
+        import threading
+        t = threading.Thread(target=bg_fetch_ai, args=(sel_cat,), daemon=True)
+        try:
+            from streamlit.runtime.scriptrunner import add_script_run_ctx
+            add_script_run_ctx(t)
+        except: pass
+        t.start()
+        
+    if not st.session_state.current_fast_q:
+        if st.button("🚀 立即开始特训", use_container_width=True):
+            if st.session_state.fast_queue:
+                st.session_state.current_fast_q = st.session_state.fast_queue.pop(0)
+                st.rerun()
+            else:
+                # 混合动力降级：如果 AI 还没出来，直接秒拉精选题库
+                qs = get_community_selected()
+                cat_qs = [q for q in (qs or []) if q.get('category') == sel_cat]
+                if cat_qs:
+                    st.session_state.current_fast_q = random.choice(cat_qs)
+                    st.rerun()
+                else:
+                    st.warning("⚡ 引擎正在预热中，请稍等 1-2 秒后再点击...")
+    else:
+        q = st.session_state.current_fast_q
+        q_text = q.get('question') or q.get('question_text') or "数据异常"
+        opts = ensure_dict(q.get('options', {}))
+        
+        st.markdown(f"<div style='background-color:#eff6ff; padding: 15px; border-radius: 8px; border-left: 5px solid #3b82f6; margin-bottom: 20px;'><h4 style='line-height:1.5;'>{format_html(q_text)}</h4></div>", unsafe_allow_html=True)
+        ans = st.radio("请选择答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key="fast_radio", index=None)
+        
+        if 'fast_ans_submitted' not in st.session_state: st.session_state.fast_ans_submitted = False
+        
+        if not st.session_state.fast_ans_submitted:
+            if ans and st.button("确认提交", use_container_width=True):
+                st.session_state.fast_ans_submitted = True
+                st.session_state.fast_ans_correct = (ans == q.get('answer'))
+                # 日志记录已经在后台异步执行，绝不卡顿
+                log_quiz_result(st.session_state.user.id, q.get('category', sel_cat), q, ans, st.session_state.fast_ans_correct, 5.0)
+                st.rerun()
+        else:
+            if st.session_state.fast_ans_correct: st.success("🎉 漂亮，回答正确！")
+            else: st.error(f"❌ 错误。正确答案是：{q.get('answer')}")
+            st.info(f"💡 解析：{q.get('analysis')}")
+            
+            c1, c2 = st.columns(2)
+            if c1.button("下一题 ⏭️", use_container_width=True):
+                st.session_state.fast_ans_submitted = False
+                if st.session_state.fast_queue:
+                    st.session_state.current_fast_q = st.session_state.fast_queue.pop(0)
+                else:
+                    qs = get_community_selected()
+                    cat_qs = [q for q in (qs or []) if q.get('category') == sel_cat]
+                    st.session_state.current_fast_q = random.choice(cat_qs) if cat_qs else None
+                st.rerun()
+            if c2.button("结束特训 🛑", use_container_width=True):
+                st.session_state.fast_ans_submitted = False
+                st.session_state.current_fast_q = None
+                st.rerun()
 
 def get_option_label(opts, key):
     val = opts.get(key) or opts.get(key.lower())
