@@ -197,20 +197,20 @@ def get_public_mistakes_with_kills(limit=100):
         st.error(f"Mistakes Sync Error: {e}")
         return []
 
-def share_to_community(q_data, category, uid):
+def share_to_community(q_data, category, uid, recommend_count=1):
     supabase = get_supabase()
     try:
         supabase.table("shared_questions").insert({
             "category": category, "question": q_data.get("question", ""), "options": q_data.get("options", {}),
-            "answer": q_data.get("answer", ""), "analysis": q_data.get("analysis", ""), "user_id": uid, "recommend_count": 1
+            "answer": q_data.get("answer", ""), "analysis": q_data.get("analysis", ""), "user_id": uid, "recommend_count": recommend_count
         }).execute()
         return True
     except: return False
 
-def get_community_selected(limit=100):
+def get_community_selected(limit=1000):
     supabase = get_supabase()
     try:
-        res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).limit(limit).execute()
+        res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).order("id", desc=True).limit(limit).execute()
         # 过滤乱码，并严格排除处于 DRAFT_ 状态的待审核题目
         valid = [q for q in (res.data or []) if q.get('question') and len(q.get('question')) > 5 and not str(q.get('category')).startswith('DRAFT_')]
         return valid
@@ -275,7 +275,7 @@ def publish_draft(draft_id, category, admin_id):
             "answer": q_data.get("answer", ""), 
             "analysis": q_data.get("analysis", ""), 
             "user_id": admin_id, 
-            "recommend_count": 1
+            "recommend_count": 100
         }).execute()
         
         supabase.table("draft_pool").delete().eq("id", draft_id).execute()
