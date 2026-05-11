@@ -84,7 +84,7 @@ def generate_ai_question(items, mode, target_hint=None):
 
     try:
         response = client.chat.completions.create(
-            model="deepseek-v4-pro",
+            model="deepseek-chat",
             messages=[{"role": "system", "content": "你是国家级中考语文命题专家，请严格遵循逻辑闭环并输出合法的单一 JSON 对象。"}, {"role": "user", "content": prompt}],
             temperature=0.25
         )
@@ -124,7 +124,7 @@ def generate_ai_question_batch(category, count=1):
 
     try:
         response = client.chat.completions.create(
-            model="deepseek-v4-pro",
+            model="deepseek-chat",
             messages=[{"role": "system", "content": "必须返回合法的 JSON 数组格式。"}, {"role": "user", "content": prompt}],
             temperature=0.3
         )
