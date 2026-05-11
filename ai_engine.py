@@ -15,7 +15,7 @@ def extract_json_robustly(text):
     json_block = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
     if json_block: content = json_block.group(1)
     else:
-        brace_match = re.search(r'(\{.*\})', text, re.DOTALL)
+        brace_match = re.search(r'(\[.*\]|\{.*\})', text, re.DOTALL)
         content = brace_match.group(1) if brace_match else text
     try: return json.loads(content.strip())
     except: return None

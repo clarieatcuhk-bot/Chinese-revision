@@ -301,7 +301,7 @@ def render_admin_lab():
     if draft_count < 10 and not st.session_state.refill_lock:
         st.session_state.refill_lock = True
         needed = 3 * (10 - draft_count)
-        fetch_count = min(needed, 5) # 每次最多批量 5 题防超时
+        fetch_count = min(needed, 2) # 降低每次批量生成的数量（最大2题），防止 AI 接口超时卡顿
         st.toast(f"🚨 池子告急！AI 正在后台静默补货 {fetch_count} 题...")
         
         def _refill(category, count):
