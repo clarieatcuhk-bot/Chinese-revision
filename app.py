@@ -7,7 +7,7 @@ import time
 import random
 import json
 import re
-from database import (
+from db_core import (
     sign_in, sign_up_and_login, get_profile, log_quiz_result, 
     get_user_all_logs, share_to_community, get_community_selected, 
     get_public_mistakes_with_kills, get_leaderboard_data, 
@@ -65,7 +65,7 @@ def start_global_daemon():
     info = WorkerInfo()
     import threading
     import time
-    from database import get_admin_uuid, get_draft_pool, share_to_community
+    from db_core import get_admin_uuid, get_draft_pool, share_to_community
     from ai_engine import generate_ai_question_batch
     import re
     
