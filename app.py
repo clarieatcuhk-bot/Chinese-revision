@@ -55,6 +55,16 @@ def format_html(text):
         text = text[:match.start()].strip()
     return text.replace("<u>", "<span style='text-decoration: underline; color: #2563eb; font-weight: bold;'>").replace("</u>", "</span>")
 
+def format_analysis(text):
+    if not text: return ""
+    text = str(text)
+    import re
+    match = re.search(r'<!-- KP: (.*?) -->', text)
+    if match:
+        kp = match.group(1)
+        text = text.replace(match.group(0), f"\n\n**🏷️ 核心知识点**：`{kp}`")
+    return text
+
 def ensure_dict(obj):
     return obj if isinstance(obj, dict) else {}
 
@@ -203,8 +213,7 @@ def render_selected_questions(is_admin):
     user_logs = get_user_all_logs(st.session_state.user.id)
     done_texts = {normalize_text(log.get('question', '')) for log in user_logs if log.get('question')}
     
-    cats = sorted(list(set([q.get('category', '综合') for q in qs])))
-    if not cats: return
+    cats = ["字音", "字形", "病句", "成语"]
     selected_cat = st.selectbox("📚 选择考点大类：", cats)
     
     # 构建 unattempted_list
@@ -244,7 +253,7 @@ def render_selected_questions(is_admin):
                 st.session_state.last_mistake_analysis = ""
             else: 
                 st.toast("❌ 回答错误", icon="❌")
-                st.session_state.last_mistake_analysis = f"正确答案是 **{q.get('answer')}**。{q.get('analysis')}"
+                st.session_state.last_mistake_analysis = f"正确答案是 **{q.get('answer')}**。\n\n{format_analysis(q.get('analysis'))}"
             st.session_state.unattempted_queue.pop(0)
             if not st.session_state.unattempted_queue:
                 st.session_state.nav_radio = "📊 个人画像"
@@ -304,8 +313,7 @@ def render_mistake_stream(is_admin):
             }
             uniq_mistakes.append((m.get('category', '综合'), q_data, m.get('id')))
             
-    cats = sorted(list(set([cat for cat, _, _ in uniq_mistakes])))
-    if not cats: return
+    cats = ["字音", "字形", "病句", "成语"]
     selected_cat = st.selectbox("📚 选择薄弱考点：", cats)
     
     if 'review_queue' not in st.session_state or st.session_state.get('last_mis_cat') != selected_cat:
@@ -344,7 +352,7 @@ def render_mistake_stream(is_admin):
                 st.session_state.last_mistake_analysis = ""
             else: 
                 st.toast("❌ 仍然错误", icon="❌")
-                st.session_state.last_mistake_analysis = f"正确答案是 **{q.get('answer')}**。{q.get('analysis')}"
+                st.session_state.last_mistake_analysis = f"正确答案是 **{q.get('answer')}**。\n\n{format_analysis(q.get('analysis'))}"
             st.session_state.review_queue.pop(0)
             if not st.session_state.review_queue:
                 st.session_state.nav_radio = "📊 个人画像"
@@ -487,7 +495,7 @@ def render_admin_lab():
             if v: st.write(f"**{k}.** {v}")
                 
         st.success(f"✅ 正确答案：{q.get('answer')}")
-        st.info(f"💡 解析：{q.get('analysis')}")
+        st.info(f"💡 解析：\n{format_analysis(q.get('analysis'))}")
             
         col1, col2 = st.columns(2)
         if col1.button("✅ 完美无瑕，通过并入库！", use_container_width=True): 
