@@ -234,42 +234,40 @@ def render_selected_questions(is_admin):
     q_text = q.get('question', '')
     opts = ensure_dict(q.get('options', {}))
     
-    if st.session_state.get('last_question_review'):
-        rev = st.session_state.last_question_review
-        if rev.get('is_correct'):
-            st.success(f"🎉 **上一题复盘（回答正确）**：\n\n{rev.get('analysis')}")
-        else:
-            st.error(f"❌ **上一题复盘（回答错误）**：\n\n正确答案是 **{rev.get('answer')}**。\n\n{rev.get('analysis')}")
-        
+    state_key = f"sel_submitted_{q['id']}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = False
     st.markdown(f"<div style='background-color:#eff6ff; padding: 15px; border-radius: 8px; border-left: 5px solid #3b82f6; margin-bottom: 20px;'><h4 style='line-height:1.5;'>{format_html(q_text)}</h4></div>", unsafe_allow_html=True)
     
     ph_ans = st.empty()
-    ans = ph_ans.radio("请选择答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key=f"sel_rad_{q['id']}", index=None)
+    ans = ph_ans.radio("请选择答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key=f"sel_rad_{q['id']}", disabled=st.session_state[state_key], index=None)
     st.write("")
     
     ph_btn = st.empty()
     
-    def on_submit():
-        if ans:
-            is_correct = (ans == q.get('answer'))
-            log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q, ans, is_correct, 5.0)
-            if is_correct: 
-                st.toast("🎉 回答正确！下一题已就绪。", icon="✅")
-            else: 
-                st.toast("❌ 回答错误", icon="❌")
-            
-            st.session_state.last_question_review = {
-                "is_correct": is_correct,
-                "answer": q.get('answer'),
-                "analysis": format_analysis(q.get('analysis'))
-            }
-            
+    if not st.session_state[state_key]:
+        def on_submit():
+            if ans:
+                st.session_state[state_key] = True
+                is_correct = (ans == q.get('answer'))
+                st.session_state[f"sel_correct_{q['id']}"] = is_correct
+                log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q, ans, is_correct, 5.0)
+                
+        ph_btn.button("提交答案 🎯", on_click=on_submit, use_container_width=True, disabled=(not ans))
+    else:
+        is_correct = st.session_state.get(f"sel_correct_{q['id']}")
+        if is_correct:
+            st.success("🎉 **回答正确！**")
+        else:
+            st.error(f"❌ **回答错误**。正确答案是 **{q.get('answer')}**。")
+        st.info(f"💡 解析：\n{format_analysis(q.get('analysis'))}")
+        
+        def on_next():
             st.session_state.unattempted_queue.pop(0)
             if not st.session_state.unattempted_queue:
                 st.session_state.nav_radio = "📊 个人画像"
-
-    if ph_btn.button("提交并下一题 ⏭️", on_click=on_submit, use_container_width=True, disabled=(not ans)):
-        pass
+                
+        ph_btn.button("确认并进入下一题 ⏭️", on_click=on_next, use_container_width=True, type="primary")
         
     if is_admin:
         st.divider()
@@ -342,42 +340,39 @@ def render_mistake_stream(is_admin):
     q_text = q.get('question', '')
     opts = ensure_dict(q.get('options', {}))
     
-    if st.session_state.get('last_question_review'):
-        rev = st.session_state.last_question_review
-        if rev.get('is_correct'):
-            st.success(f"🎉 **上一题复盘（涅槃成功）**：\n\n{rev.get('analysis')}")
-        else:
-            st.error(f"❌ **上一题复盘（仍然错误）**：\n\n正确答案是 **{rev.get('answer')}**。\n\n{rev.get('analysis')}")
+    state_key = f"mis_submitted_{q['id']}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = False
         
-    st.markdown(f"<div style='background-color:#fffbeb; padding: 15px; border-radius: 8px; border-left: 5px solid #f59e0b; margin-bottom: 20px;'><h4 style='line-height:1.5;'>{format_html(q_text)}</h4></div>", unsafe_allow_html=True)
-    
     ph_ans = st.empty()
-    ans = ph_ans.radio("重选答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key=f"redo_rad_{q['id']}", index=None)
+    ans = ph_ans.radio("重选答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key=f"redo_rad_{q['id']}", disabled=st.session_state[state_key], index=None)
     st.write("")
     
     ph_btn = st.empty()
     
-    def on_submit_mistake():
-        if ans:
-            is_correct = (ans == q.get('answer'))
-            log_quiz_result(st.session_state.user.id, selected_cat, q, ans, is_correct, 5.0)
-            if is_correct: 
-                st.toast("🎉 涅槃成功！新记录已同步。", icon="✅")
-            else: 
-                st.toast("❌ 仍然错误", icon="❌")
-            
-            st.session_state.last_question_review = {
-                "is_correct": is_correct,
-                "answer": q.get('answer'),
-                "analysis": format_analysis(q.get('analysis'))
-            }
+    if not st.session_state[state_key]:
+        def on_submit_mistake():
+            if ans:
+                st.session_state[state_key] = True
+                is_correct = (ans == q.get('answer'))
+                st.session_state[f"mis_correct_{q['id']}"] = is_correct
+                log_quiz_result(st.session_state.user.id, selected_cat, q, ans, is_correct, 5.0)
                 
+        ph_btn.button("提交答案 🎯", on_click=on_submit_mistake, use_container_width=True, disabled=(not ans))
+    else:
+        is_correct = st.session_state.get(f"mis_correct_{q['id']}")
+        if is_correct:
+            st.success("🎉 **涅槃成功！新记录已同步。**")
+        else:
+            st.error(f"❌ **仍然错误**。正确答案是 **{q.get('answer')}**。")
+        st.info(f"💡 解析：\n{format_analysis(q.get('analysis'))}")
+        
+        def on_next_mistake():
             st.session_state.review_queue.pop(0)
             if not st.session_state.review_queue:
                 st.session_state.nav_radio = "📊 个人画像"
-
-    if ph_btn.button("提交并下一题 ⏭️", on_click=on_submit_mistake, use_container_width=True, disabled=(not ans)):
-        pass
+                
+        ph_btn.button("确认并进入下一题 ⏭️", on_click=on_next_mistake, use_container_width=True, type="primary")
 
 def render_leaderboard(current_user_is_admin):
     st.markdown("<div class='page-header'><h1>🏆 七维荣耀金榜</h1><p>全景竞技数据</p></div>", unsafe_allow_html=True)
