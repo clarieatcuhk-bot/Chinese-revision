@@ -272,6 +272,9 @@ def render_mistake_stream(is_admin):
         return
         
     # 去重并提取分类
+    sh_qs = get_community_selected(limit=2000)
+    sh_map = {normalize_text(q.get('question', '')): q for q in sh_qs}
+    
     seen = set()
     uniq_mistakes = []
     for m in reversed(mistakes): # 按时间倒序或正序，此处倒序保证最近的先练
@@ -279,12 +282,25 @@ def render_mistake_stream(is_admin):
         q_text = normalize_text(q_text_raw)
         if q_text and q_text not in seen:
             seen.add(q_text)
+            
+            opts = ensure_dict(m.get('options', {}))
+            ans = m.get('answer')
+            analysis = m.get('analysis')
+            
+            # 容错降级：如果 user_logs 丢失了选项（因为部分用户旧表没这列），从全站题库里“借”回来
+            if q_text in sh_map:
+                std_q = sh_map[q_text]
+                if not opts: opts = ensure_dict(std_q.get('options', {}))
+                if not ans: ans = std_q.get('answer')
+                if not analysis: analysis = std_q.get('analysis')
+                q_text_raw = std_q.get('question', q_text_raw) # 顺便借用可能带有富文本的完美题干
+            
             q_data = {
                 "id": m.get('id'),
                 "question": q_text_raw,
-                "options": ensure_dict(m.get('options')),
-                "answer": m.get('answer'),
-                "analysis": m.get('analysis')
+                "options": opts,
+                "answer": ans,
+                "analysis": analysis
             }
             uniq_mistakes.append((m.get('category', '综合'), q_data, m.get('id')))
             
@@ -335,16 +351,6 @@ def render_mistake_stream(is_admin):
 
     if ph_btn.button("提交并下一题 ⏭️", on_click=on_submit_mistake, use_container_width=True, disabled=(not ans)):
         pass
-            
-        if is_admin:
-            if c2.button("🗑️ 拔除错题", key=f"del_mk_{m.get('id', random.random())}"):
-                delete_all_logs_of_question(m.get('question'))
-                st.toast("✅ 该错题已从全站记录中抹除")
-                time.sleep(0.5); st.rerun()
-        st.write("") 
-        
-    if len(cat_mk) > max_display:
-        st.info(f"👆 错题较多，当前仅展示最具挑战性的 {max_display} 题。")
 
 def render_leaderboard(current_user_is_admin):
     st.markdown("<div class='page-header'><h1>🏆 七维荣耀金榜</h1><p>全景竞技数据</p></div>", unsafe_allow_html=True)
