@@ -539,8 +539,12 @@ def render_admin_lab():
         if col1.button("✅ 完美无瑕，通过并入库！", use_container_width=True): 
             success, msg = publish_draft(q['id'], sel_cat, st.session_state.user.id)
             if success:
-                st.toast("入库成功！下一题已自动加载。")
-                time.sleep(0.3)
+                if msg == "Duplicate":
+                    st.toast("⚠️ 触发去重机制：该题库已存在完全相同的题目，已为您自动报废！", icon="♻️")
+                    time.sleep(1.5)
+                else:
+                    st.toast("🎉 入库成功！下一题已自动加载。", icon="✅")
+                    time.sleep(0.3)
                 st.rerun()
             else:
                 st.error(f"入库失败: {msg}")
