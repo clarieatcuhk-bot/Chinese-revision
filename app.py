@@ -46,7 +46,13 @@ def ensure_dict(data):
 
 def format_html(text):
     if not text: return ""
-    return str(text).replace("<u>", "<span style='text-decoration: underline; color: #2563eb; font-weight: bold;'>").replace("</u>", "</span>")
+    text = str(text)
+    import re
+    # 截断题干中可能混入的 "A. xxx B. xxx" 选项文本
+    match = re.search(r'(\n|<br>)?\s*A[．、.]\s', text)
+    if match:
+        text = text[:match.start()].strip()
+    return text.replace("<u>", "<span style='text-decoration: underline; color: #2563eb; font-weight: bold;'>").replace("</u>", "</span>")
 
 def ensure_dict(obj):
     return obj if isinstance(obj, dict) else {}
@@ -175,7 +181,10 @@ def app_shell():
 
 def get_option_label(opts, key):
     val = opts.get(key) or opts.get(key.lower())
-    return f"{key}. {val}" if val else key
+    if not val: return key
+    # Streamlit radio 不支持原生 HTML 标签，因此将 <u> 转换为 Markdown 加粗
+    val = str(val).replace("<u>", "**").replace("</u>", "**")
+    return f"{key}. {val}"
 
 def render_selected_questions(is_admin):
     st.markdown("<div class='page-header'><h1>🌟 老师精选题库</h1><p>全自动答题流水线，攻克未做题目</p></div>", unsafe_allow_html=True)
