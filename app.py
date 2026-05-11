@@ -211,10 +211,12 @@ def render_selected_questions(is_admin):
     if 'unattempted_queue' not in st.session_state or st.session_state.get('last_sel_cat') != selected_cat:
         st.session_state.unattempted_queue = [q for q in qs if q.get('category', '综合') == selected_cat and normalize_text(q.get('question', '')) not in done_texts]
         st.session_state.last_sel_cat = selected_cat
+        st.session_state.last_mistake_analysis = ""
         
     queue = st.session_state.unattempted_queue
     
     if not queue:
+        st.session_state.last_mistake_analysis = ""
         st.success("🎉 恭喜！当前模块已通关，请前往【个人画像】查看今日能力报告。")
         return
         
@@ -222,6 +224,9 @@ def render_selected_questions(is_admin):
     q_text = q.get('question', '')
     opts = ensure_dict(q.get('options', {}))
     
+    if st.session_state.get('last_mistake_analysis'):
+        st.error(f"❌ **上一题复盘**：\n\n{st.session_state.last_mistake_analysis}")
+        
     st.markdown(f"<div style='background-color:#eff6ff; padding: 15px; border-radius: 8px; border-left: 5px solid #3b82f6; margin-bottom: 20px;'><h4 style='line-height:1.5;'>{format_html(q_text)}</h4></div>", unsafe_allow_html=True)
     
     ph_ans = st.empty()
@@ -234,8 +239,12 @@ def render_selected_questions(is_admin):
         if ans:
             is_correct = (ans == q.get('answer'))
             log_quiz_result(st.session_state.user.id, q.get('category', '综合'), q, ans, is_correct, 5.0)
-            if is_correct: st.toast("🎉 回答正确！下一题已就绪。", icon="✅")
-            else: st.toast(f"❌ 错误。正确答案是：{q.get('answer')}。解析：{q.get('analysis')}", icon="❌")
+            if is_correct: 
+                st.toast("🎉 回答正确！下一题已就绪。", icon="✅")
+                st.session_state.last_mistake_analysis = ""
+            else: 
+                st.toast("❌ 回答错误", icon="❌")
+                st.session_state.last_mistake_analysis = f"正确答案是 **{q.get('answer')}**。{q.get('analysis')}"
             st.session_state.unattempted_queue.pop(0)
             if not st.session_state.unattempted_queue:
                 st.session_state.nav_radio = "📊 个人画像"
@@ -266,10 +275,17 @@ def render_mistake_stream(is_admin):
     seen = set()
     uniq_mistakes = []
     for m in reversed(mistakes): # 按时间倒序或正序，此处倒序保证最近的先练
-        q_data = ensure_dict(m.get('question_data', m.get('question', {})))
-        q_text = normalize_text(q_data.get('question', ''))
+        q_text_raw = str(m.get('question', ''))
+        q_text = normalize_text(q_text_raw)
         if q_text and q_text not in seen:
             seen.add(q_text)
+            q_data = {
+                "id": m.get('id'),
+                "question": q_text_raw,
+                "options": ensure_dict(m.get('options')),
+                "answer": m.get('answer'),
+                "analysis": m.get('analysis')
+            }
             uniq_mistakes.append((m.get('category', '综合'), q_data, m.get('id')))
             
     cats = sorted(list(set([cat for cat, _, _ in uniq_mistakes])))
@@ -279,10 +295,12 @@ def render_mistake_stream(is_admin):
     if 'review_queue' not in st.session_state or st.session_state.get('last_mis_cat') != selected_cat:
         st.session_state.review_queue = [q for cat, q, _ in uniq_mistakes if cat == selected_cat]
         st.session_state.last_mis_cat = selected_cat
+        st.session_state.last_mistake_analysis = ""
         
     queue = st.session_state.review_queue
     
     if not queue:
+        st.session_state.last_mistake_analysis = ""
         st.success("🎉 恭喜！当前考点错题已清空，请前往【个人画像】查看今日能力报告。")
         return
         
@@ -290,6 +308,9 @@ def render_mistake_stream(is_admin):
     q_text = q.get('question', '')
     opts = ensure_dict(q.get('options', {}))
     
+    if st.session_state.get('last_mistake_analysis'):
+        st.error(f"❌ **上一题错误复盘**：\n\n{st.session_state.last_mistake_analysis}")
+        
     st.markdown(f"<div style='background-color:#fffbeb; padding: 15px; border-radius: 8px; border-left: 5px solid #f59e0b; margin-bottom: 20px;'><h4 style='line-height:1.5;'>{format_html(q_text)}</h4></div>", unsafe_allow_html=True)
     
     ph_ans = st.empty()
@@ -302,8 +323,12 @@ def render_mistake_stream(is_admin):
         if ans:
             is_correct = (ans == q.get('answer'))
             log_quiz_result(st.session_state.user.id, selected_cat, q, ans, is_correct, 5.0)
-            if is_correct: st.toast("🎉 涅槃成功！新记录已同步。", icon="✅")
-            else: st.toast(f"❌ 仍然错误。正确答案是：{q.get('answer')}。解析：{q.get('analysis')}", icon="❌")
+            if is_correct: 
+                st.toast("🎉 涅槃成功！新记录已同步。", icon="✅")
+                st.session_state.last_mistake_analysis = ""
+            else: 
+                st.toast("❌ 仍然错误", icon="❌")
+                st.session_state.last_mistake_analysis = f"正确答案是 **{q.get('answer')}**。{q.get('analysis')}"
             st.session_state.review_queue.pop(0)
             if not st.session_state.review_queue:
                 st.session_state.nav_radio = "📊 个人画像"
