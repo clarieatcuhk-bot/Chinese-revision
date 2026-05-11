@@ -210,7 +210,7 @@ def share_to_community(q_data, category, uid, recommend_count=1):
 def get_community_selected(limit=1000):
     supabase = get_supabase()
     try:
-        res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).order("id", desc=True).limit(limit).execute()
+        res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).order("created_at", desc=True).limit(limit).execute()
         # 过滤乱码，并严格排除处于 DRAFT_ 状态的待审核题目
         valid = [q for q in (res.data or []) if q.get('question') and len(q.get('question')) > 5 and not str(q.get('category')).startswith('DRAFT_')]
         return valid
