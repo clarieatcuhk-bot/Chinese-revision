@@ -12,7 +12,8 @@ from db_core import (
     get_user_all_logs, share_to_community, get_community_selected, 
     get_public_mistakes_with_kills, get_leaderboard_data, 
     clear_user_mistakes, delete_all_logs_of_question, delete_shared_question,
-    increment_challenge_stats, normalize_text, get_draft_pool, publish_draft, get_admin_uuid
+    increment_challenge_stats, normalize_text, get_draft_pool, publish_draft, get_admin_uuid,
+    add_to_draft_pool, delete_draft, clean_draft_pool_data
 )
 from ai_engine import generate_ai_question, evaluate_challenge, generate_ai_question_batch
 
@@ -71,13 +72,17 @@ def start_global_daemon():
     info = WorkerInfo()
     import threading
     import time
-    from db_core import get_admin_uuid, get_draft_pool, share_to_community
+    from db_core import get_admin_uuid, get_draft_pool, add_to_draft_pool
     from ai_engine import generate_ai_question_batch
     import re
     
     def _daemon():
         admin_id = get_admin_uuid()
         cats = ["字音", "字形", "病句", "成语"]
+        
+        info.status = "执行启动期数据库热洗 (Hot Wash)..."
+        clean_draft_pool_data()
+        
         while True:
             info.status = "扫描全站题库..."
             for cat in cats:
@@ -102,7 +107,7 @@ def start_global_daemon():
                             if kp and kp in recent_kps:
                                 info.total_discarded += 1
                                 continue
-                            if share_to_community(q, f"DRAFT_{cat}", admin_id):
+                            if add_to_draft_pool(q):
                                 info.inventory[cat] = info.inventory.get(cat, 0) + 1
                     except Exception as e:
                         print(f"Daemon error: {e}")
@@ -455,13 +460,13 @@ def render_admin_lab():
             
         col1, col2 = st.columns(2)
         if col1.button("✅ 完美无瑕，通过并入库！", use_container_width=True): 
-            publish_draft(q['id'], sel_cat)
+            publish_draft(q['id'], sel_cat, st.session_state.user.id)
             st.toast("入库成功！下一题已自动加载。")
             time.sleep(0.3)
             st.rerun()
             
         if col2.button("🗑️ 逻辑不通，直接报废", use_container_width=True):
-            delete_shared_question(q['id'])
+            delete_draft(q['id'])
             st.toast("已物理删除，下一题已加载。")
             time.sleep(0.3)
             st.rerun()

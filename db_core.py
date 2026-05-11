@@ -216,17 +216,76 @@ def get_community_selected(limit=100):
         return valid
     except: return []
 
+def add_to_draft_pool(q_data):
+    supabase = get_supabase()
+    try:
+        supabase.table("draft_pool").insert({
+            "category": q_data.get("category"),
+            "content": q_data,
+            "logic_fingerprint": q_data.get("logic_fingerprint", ""),
+            "knowledge_point": q_data.get("knowledge_point", "")
+        }).execute()
+        return True
+    except: return False
+
+def clean_draft_pool_data():
+    supabase = get_supabase()
+    try:
+        res = supabase.table("draft_pool").select("*").execute()
+        from ai_engine import get_clean_category
+        for row in (res.data or []):
+            content = row.get("content", {})
+            full_text = content.get("question", "") + " " + content.get("analysis", "")
+            raw_cat = row.get("category", "")
+            
+            clean = get_clean_category(raw_cat, full_text)
+            if clean != raw_cat:
+                content["category"] = clean
+                supabase.table("draft_pool").update({
+                    "category": clean,
+                    "content": content
+                }).eq("id", row["id"]).execute()
+    except Exception as e:
+        print(f"Hot wash error: {e}")
+
 def get_draft_pool(category):
     supabase = get_supabase()
     try:
-        res = supabase.table("shared_questions").select("*").eq("category", f"DRAFT_{category}").execute()
-        return res.data or []
+        res = supabase.table("draft_pool").select("*").eq("category", category).execute()
+        if not res.data: return []
+        ret = []
+        for r in res.data:
+            q = r.get('content', {})
+            q['id'] = r.get('id')
+            ret.append(q)
+        return ret
     except: return []
 
-def publish_draft(q_id, original_category):
+def publish_draft(draft_id, category, admin_id):
     supabase = get_supabase()
     try:
-        supabase.table("shared_questions").update({"category": original_category}).eq("id", q_id).execute()
+        res = supabase.table("draft_pool").select("*").eq("id", draft_id).execute()
+        if not res.data: return False
+        q_data = res.data[0].get('content', {})
+        
+        supabase.table("shared_questions").insert({
+            "category": category, 
+            "question": q_data.get("question", ""), 
+            "options": q_data.get("options", {}),
+            "answer": q_data.get("answer", ""), 
+            "analysis": q_data.get("analysis", ""), 
+            "user_id": admin_id, 
+            "recommend_count": 1
+        }).execute()
+        
+        supabase.table("draft_pool").delete().eq("id", draft_id).execute()
+        return True
+    except: return False
+
+def delete_draft(draft_id):
+    supabase = get_supabase()
+    try:
+        supabase.table("draft_pool").delete().eq("id", draft_id).execute()
         return True
     except: return False
 

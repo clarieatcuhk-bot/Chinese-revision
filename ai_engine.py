@@ -5,14 +5,21 @@ from openai import OpenAI
 
 VALID_CATEGORIES = ["字音", "字形", "病句", "成语"]
 
-def get_clean_category(raw_cat):
-    if not raw_cat: return "字音"
-    raw = str(raw_cat)
-    if "音" in raw: return "字音"
-    if "形" in raw or "3500字" in raw or "基础" in raw: return "字形"
+def get_clean_category(raw_cat, content_text=""):
+    raw = str(raw_cat) if raw_cat else ""
+    content = str(content_text)
+    
+    # 二次校验防交叉污染：如果内容包含典型语病关键词，强制覆盖为“病句”
+    if any(k in content for k in ["成分残缺", "搭配不当", "语序不当", "句式杂糅", "表意不明", "不合逻辑", "语病"]):
+        return "病句"
+        
+    # 优先级匹配
     if "句" in raw: return "病句"
+    if "音" in raw: return "字音"
     if "成语" in raw: return "成语"
-    return "字音"
+    
+    # 兜底归为“字形”
+    return "字形"
 
 def get_ai_client():
     try:
@@ -168,8 +175,9 @@ def generate_ai_question_batch(category, count=1, recent_kps=None):
         for item in items:
             q = sanitize_question(item, default_cat=category)
             if q and "error" not in q:
-                # 分类强纠正
-                q['category'] = get_clean_category(q.get('category'))
+                # 分类强纠正与防交叉污染校验
+                full_content = q.get('question', '') + " " + q.get('analysis', '')
+                q['category'] = get_clean_category(q.get('category'), full_content)
                 
                 # 乱码清洗与校验
                 q['question'] = clean_text(q.get('question', ''))
