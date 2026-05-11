@@ -77,7 +77,7 @@ def start_global_daemon():
     
     def _daemon():
         admin_id = get_admin_uuid()
-        cats = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础", "文学常识与传统文化"]
+        cats = ["字音", "字形", "病句", "成语"]
         while True:
             info.status = "扫描全站题库..."
             for cat in cats:
@@ -389,7 +389,7 @@ def render_personal_dashboard():
     else: st.info("暂无做题记录，波动图将在你答题后生成。")
         
     st.markdown("### 🏹 核心罗盘")
-    axes = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础"]
+    axes = ["字音", "字形", "病句", "成语"]
     st_v = df.groupby('category')['is_correct'].mean().to_dict() if not df.empty else {}
     radar_values = [st_v.get(a, 0)*100 for a in axes]
     fig_radar = go.Figure(data=go.Scatterpolar(r=radar_values, theta=axes, fill='toself'))
@@ -426,7 +426,7 @@ def render_admin_lab():
             
     st.divider()
     
-    cats = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础", "文学常识与传统文化"]
+    cats = ["字音", "字形", "病句", "成语"]
     sel_cat = st.selectbox("🎯 选择审核流水线考点：", cats)
     
     drafts = get_draft_pool(sel_cat)
@@ -471,7 +471,7 @@ def render_admin_lab():
 def render_fast_training():
     st.markdown("<div class='page-header'><h1>⚡ 极速特训</h1><p>智能出题引擎，零延迟连刷体验</p></div>", unsafe_allow_html=True)
     
-    cats = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础", "文学常识与传统文化"]
+    cats = ["字音", "字形", "病句", "成语"]
     sel_cat = st.selectbox("🎯 选择特训考点：", cats)
     
     if 'fast_queue' not in st.session_state: st.session_state.fast_queue = []

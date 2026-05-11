@@ -3,6 +3,17 @@ import re
 import streamlit as st
 from openai import OpenAI
 
+VALID_CATEGORIES = ["字音", "字形", "病句", "成语"]
+
+def get_clean_category(raw_cat):
+    if not raw_cat: return "字音"
+    raw = str(raw_cat)
+    if "音" in raw: return "字音"
+    if "形" in raw or "3500字" in raw or "基础" in raw: return "字形"
+    if "句" in raw: return "病句"
+    if "成语" in raw: return "成语"
+    return "字音"
+
 def get_ai_client():
     try:
         api_key = st.secrets.get("DEEPSEEK_API_KEY") or st.secrets.get("OPENAI_API_KEY")
@@ -112,20 +123,26 @@ def generate_ai_question_batch(category, count=1, recent_kps=None):
         avoid_str = f"【知识点去重警报】: 同一分类下连续 10 道题目严禁出现相同的底层知识点。近期已生成的知识点: {', '.join(recent_kps)}。本次生成【严禁重复使用】！\n"
 
     prompt = f"""
-    Role: 国家级中考语文命题专家，拥有 20 年逻辑校验经验。
+    Role: 中考语文命题专家，拥有 20 年逻辑校验经验。
     
     Task: 批量生产 {count} 道【{category}】题目，存入“全站预生成池”。
+    
+    Constraint: 你生成的每一道题目必须严格属于以下四个板块之一，严禁自创分类：
+    字音: 考查多音字、易错字读音。
+    字形: 考查形近字、同音字纠错。
+    病句: 考查成分残缺、搭配不当等六大语病。
+    成语: 考查成语意思、褒贬色彩及语境运用。
     
     1. 逻辑锁定与知识点去重 (Diversity Engine):
     前置校验: 在生成每道题前，必须先生成 knowledge_point（底层知识点，如“成分残缺-介词掩盖主语”）。
     {avoid_str}
-    一致性检查: 解析必须能唯一指向答案字母。若出现“答案为 A 但解析在讲 B”，自动作废。
+    逻辑校验: 严禁出现分类为“病句”但题干在考“读音”的情况。一致性检查: 解析必须能唯一指向答案字母。若出现“答案为 A 但解析在讲 B”，自动作废。
     
     2. 格式与素材约束:
     HTML 支持: 考察字必须使用 <u></u> 标注。确保内外汉字为标准 UTF-8 编码，严禁乱码。
     数据源: 严格对应 chinese_assets.json 或 chars_3500.json。
     JSON 结构: 必须返回标准 JSON 数组，每个对象包含：
-    "category": "{category}", "question", "options" (A,B,C,D字典), "answer", "analysis", "knowledge_point", "logic_fingerprint"
+    "category": "必须是 字音|字形|病句|成语 其中之一", "question", "options" (A,B,C,D字典), "answer", "analysis", "knowledge_point", "logic_fingerprint"
     
     3. 幻觉与乱码屏蔽:
     严禁出现模糊不清的干扰项。严禁任何编码错误（如 \ufffd）或非标准汉字。
@@ -151,6 +168,9 @@ def generate_ai_question_batch(category, count=1, recent_kps=None):
         for item in items:
             q = sanitize_question(item, default_cat=category)
             if q and "error" not in q:
+                # 分类强纠正
+                q['category'] = get_clean_category(q.get('category'))
+                
                 # 乱码清洗与校验
                 q['question'] = clean_text(q.get('question', ''))
                 q['analysis'] = clean_text(q.get('analysis', ''))
