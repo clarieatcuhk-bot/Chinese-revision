@@ -210,10 +210,8 @@ def render_selected_questions(is_admin):
     queue = st.session_state.unattempted_queue
     
     if not queue:
-        st.success("🎉 恭喜！当前模块已通关，正在为你生成今日能力报告。")
-        time.sleep(1.5)
-        st.session_state.nav_radio = "📊 个人画像"
-        st.rerun()
+        st.success("🎉 恭喜！当前模块已通关，请前往【个人画像】查看今日能力报告。")
+        return
         
     q = queue[0]
     q_text = q.get('question', '')
@@ -234,6 +232,8 @@ def render_selected_questions(is_admin):
             if is_correct: st.toast("🎉 回答正确！下一题已就绪。", icon="✅")
             else: st.toast(f"❌ 错误。正确答案是：{q.get('answer')}。解析：{q.get('analysis')}", icon="❌")
             st.session_state.unattempted_queue.pop(0)
+            if not st.session_state.unattempted_queue:
+                st.session_state.nav_radio = "📊 个人画像"
 
     if ph_btn.button("提交并下一题 ⏭️", on_click=on_submit, use_container_width=True, disabled=(not ans)):
         pass
@@ -278,10 +278,8 @@ def render_mistake_stream(is_admin):
     queue = st.session_state.review_queue
     
     if not queue:
-        st.success("🎉 恭喜！当前考点错题已清空，正在为你生成今日能力报告。")
-        time.sleep(1.5)
-        st.session_state.nav_radio = "📊 个人画像"
-        st.rerun()
+        st.success("🎉 恭喜！当前考点错题已清空，请前往【个人画像】查看今日能力报告。")
+        return
         
     q = queue[0]
     q_text = q.get('question', '')
@@ -302,6 +300,8 @@ def render_mistake_stream(is_admin):
             if is_correct: st.toast("🎉 涅槃成功！新记录已同步。", icon="✅")
             else: st.toast(f"❌ 仍然错误。正确答案是：{q.get('answer')}。解析：{q.get('analysis')}", icon="❌")
             st.session_state.review_queue.pop(0)
+            if not st.session_state.review_queue:
+                st.session_state.nav_radio = "📊 个人画像"
 
     if ph_btn.button("提交并下一题 ⏭️", on_click=on_submit_mistake, use_container_width=True, disabled=(not ans)):
         pass
