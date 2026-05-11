@@ -230,6 +230,14 @@ def publish_draft(q_id, original_category):
         return True
     except: return False
 
+def get_admin_uuid():
+    supabase = get_supabase()
+    try:
+        res = supabase.table("profiles").select("id").limit(1).execute()
+        if res.data: return res.data[0]['id']
+    except: pass
+    return "00000000-0000-0000-0000-000000000000"
+
 def get_user_all_logs(uid):
     supabase = get_supabase()
     try:

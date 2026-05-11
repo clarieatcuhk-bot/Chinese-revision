@@ -12,7 +12,7 @@ from database import (
     get_user_all_logs, share_to_community, get_community_selected, 
     get_public_mistakes_with_kills, get_leaderboard_data, 
     clear_user_mistakes, delete_all_logs_of_question, delete_shared_question,
-    increment_challenge_stats, normalize_text, get_draft_pool, publish_draft
+    increment_challenge_stats, normalize_text, get_draft_pool, publish_draft, get_admin_uuid
 )
 from ai_engine import generate_ai_question, evaluate_challenge, generate_ai_question_batch
 
@@ -47,6 +47,76 @@ def ensure_dict(data):
 def format_html(text):
     if not text: return ""
     return str(text).replace("<u>", "<span style='text-decoration: underline; color: #2563eb; font-weight: bold;'>").replace("</u>", "</span>")
+
+def ensure_dict(obj):
+    return obj if isinstance(obj, dict) else {}
+
+@st.cache_resource
+def start_global_daemon():
+    class WorkerInfo:
+        def __init__(self):
+            self.status = "初始化"
+            self.last_run = "未运行"
+            self.total_generated = 0
+            self.total_discarded = 0
+            self.hit_rate = 0.0
+            self.inventory = {}
+            
+    info = WorkerInfo()
+    import threading
+    import time
+    from database import get_admin_uuid, get_draft_pool, share_to_community
+    from ai_engine import generate_ai_question_batch
+    import re
+    
+    def _daemon():
+        admin_id = get_admin_uuid()
+        cats = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础", "文学常识与传统文化"]
+        while True:
+            info.status = "扫描全站题库..."
+            for cat in cats:
+                drafts = get_draft_pool(cat)
+                x = len(drafts)
+                info.inventory[cat] = x
+                if x < 10:
+                    info.status = f"正在为【{cat}】智能补货..."
+                    needed = 3 * (10 - x)
+                    fetch_count = min(needed, 2)
+                    
+                    recent_kps = []
+                    for d in drafts[:10]:
+                        match = re.search(r'<!-- KP: (.*?) -->', d.get('analysis', ''))
+                        if match: recent_kps.append(match.group(1))
+                    
+                    try:
+                        new_qs = generate_ai_question_batch(cat, fetch_count, recent_kps)
+                        for q in new_qs:
+                            info.total_generated += 1
+                            kp = q.get('knowledge_point', '')
+                            if kp and kp in recent_kps:
+                                info.total_discarded += 1
+                                continue
+                            if share_to_community(q, f"DRAFT_{cat}", admin_id):
+                                info.inventory[cat] = info.inventory.get(cat, 0) + 1
+                    except Exception as e:
+                        print(f"Daemon error: {e}")
+            
+            if info.total_generated > 0:
+                info.hit_rate = (info.total_discarded / info.total_generated) * 100
+                
+            info.status = "休眠中 (等待下一轮扫描)"
+            info.last_run = time.strftime("%H:%M:%S")
+            time.sleep(300)
+            
+    t = threading.Thread(target=_daemon, daemon=True)
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+        add_script_run_ctx(t)
+    except: pass
+    t.start()
+    return info
+
+worker_info = start_global_daemon()
 
 # --- Session State ---
 if 'user' not in st.session_state: st.session_state.user = None
@@ -283,43 +353,31 @@ def render_personal_dashboard():
         else: st.success("干得漂亮！错题集目前是空的。")
 
 def render_admin_lab():
-    st.markdown("<div class='page-header'><h1>📖 命题实验室</h1><p>工业级自动化刷题审核流水线</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-header'><h1>📖 命题实验室</h1><p>全自动去重命题流水线</p></div>", unsafe_allow_html=True)
+    
+    # --- 后台流水线监控面板 ---
+    st.markdown("### ⚙️ 后台流水线监控面板")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("守护线程状态", worker_info.status)
+    c2.metric("上次扫描", worker_info.last_run)
+    c3.metric("去重命中率", f"{worker_info.hit_rate:.1f}%")
+    c4.metric("生成/报废", f"{worker_info.total_generated} / {worker_info.total_discarded}")
+    
+    with st.expander("📦 各分类实时库存情况"):
+        for k, v in worker_info.inventory.items():
+            st.write(f"- **{k}**: {v} 题")
+            
+    st.divider()
     
     cats = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础", "文学常识与传统文化"]
     sel_cat = st.selectbox("🎯 选择审核流水线考点：", cats)
-    
-    # 动态补货算法 (Dynamic Refill)
-    if 'refill_lock' not in st.session_state: st.session_state.refill_lock = False
     
     drafts = get_draft_pool(sel_cat)
     draft_count = len(drafts)
     
     c1, c2 = st.columns([3, 1])
     c1.markdown(f"**当前【{sel_cat}】缓冲池余量: `{draft_count}` 题**")
-    if c2.button("🔄 刷新池子", use_container_width=True): st.rerun()
-    
-    if draft_count < 10 and not st.session_state.refill_lock:
-        st.session_state.refill_lock = True
-        needed = 3 * (10 - draft_count)
-        fetch_count = min(needed, 2) # 降低每次批量生成的数量（最大2题），防止 AI 接口超时卡顿
-        st.toast(f"🚨 池子告急！AI 正在后台静默补货 {fetch_count} 题...")
-        
-        def _refill(category, count, uid):
-            try:
-                new_qs = generate_ai_question_batch(category, count)
-                for q in new_qs:
-                    share_to_community(q, f"DRAFT_{category}", uid)
-            except: pass
-            finally:
-                st.session_state.refill_lock = False
-                
-        import threading
-        t = threading.Thread(target=_refill, args=(sel_cat, fetch_count, st.session_state.user.id), daemon=True)
-        try:
-            from streamlit.runtime.scriptrunner import add_script_run_ctx
-            add_script_run_ctx(t)
-        except: pass
-        t.start()
+    if c2.button("🔄 刷新界面", use_container_width=True): st.rerun()
         
     st.divider()
     
@@ -351,7 +409,7 @@ def render_admin_lab():
             time.sleep(0.3)
             st.rerun()
     else:
-        st.info("🕒 当前分类的缓冲池已空，AI 正在后台紧急加班出题中... 请稍候刷新！")
+        st.info("🕒 当前分类的缓冲池已空，守护线程将自动为您后台补货，请稍候刷新！")
 
 def render_fast_training():
     st.markdown("<div class='page-header'><h1>⚡ 极速特训</h1><p>智能出题引擎，零延迟连刷体验</p></div>", unsafe_allow_html=True)

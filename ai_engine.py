@@ -95,29 +95,40 @@ def generate_ai_question(items, mode, target_hint=None):
     except Exception as e:
         return {"error": str(e)}
 
-def generate_ai_question_batch(category, count=1):
+def clean_text(text):
+    if not isinstance(text, str): return text
+    import html
+    text = html.unescape(text)
+    # 强制修复常见的乱码实体，如 `` (xFFFD) 或错误字符
+    text = text.replace("\ufffd", "")
+    return text
+
+def generate_ai_question_batch(category, count=1, recent_kps=None):
     client = get_ai_client()
     if not client: return []
     
+    avoid_str = ""
+    if recent_kps and len(recent_kps) > 0:
+        avoid_str = f"【知识点去重警报】: 同一分类下连续 10 道题目严禁出现相同的底层知识点。近期已生成的知识点: {', '.join(recent_kps)}。本次生成【严禁重复使用】！\n"
+
     prompt = f"""
     Role: 国家级中考语文命题专家，拥有 20 年逻辑校验经验。
     
     Task: 批量生产 {count} 道【{category}】题目，存入“全站预生成池”。
     
-    1. 逻辑锁定协议 (Crucial!):
-    前置校验: 在生成每道题的内容前，必须先在内部生成 logic_anchor（逻辑锚点）。
-    一致性检查: 强制检查：解析内容必须能唯一指向答案字母。若出现“答案为 A 但解析在讲 B”的情况，该题自动作废。
-    解析风格: 使用“手术刀紧缩法”，直击语病或字音的核心矛盾。
+    1. 逻辑锁定与知识点去重 (Diversity Engine):
+    前置校验: 在生成每道题前，必须先生成 knowledge_point（底层知识点，如“成分残缺-介词掩盖主语”）。
+    {avoid_str}
+    一致性检查: 解析必须能唯一指向答案字母。若出现“答案为 A 但解析在讲 B”，自动作废。
     
     2. 格式与素材约束:
-    HTML 支持: 考察字必须使用 <u></u> 标注。
-    数据源: 严格对应 chinese_assets.json（课内）或 chars_3500.json（全量）。
-    JSON 结构: 必须返回标准的 JSON 数组，数组中每个对象包含：
-    "category": "{category}", "question", "options" (A,B,C,D字典格式), "answer", "analysis", "logic_fingerprint"
+    HTML 支持: 考察字必须使用 <u></u> 标注。确保内外汉字为标准 UTF-8 编码，严禁乱码。
+    数据源: 严格对应 chinese_assets.json 或 chars_3500.json。
+    JSON 结构: 必须返回标准 JSON 数组，每个对象包含：
+    "category": "{category}", "question", "options" (A,B,C,D字典), "answer", "analysis", "knowledge_point", "logic_fingerprint"
     
-    3. 幻觉屏蔽:
-    严禁出现模糊不清的干扰项。
-    干扰项的设置必须符合中考常考误区（如：介词掩盖主语、多音字误读）。
+    3. 幻觉与乱码屏蔽:
+    严禁出现模糊不清的干扰项。严禁任何编码错误（如 \ufffd）或非标准汉字。
     
     请直接输出 JSON 数组，例如 [{{...}}, {{...}}]
     """
@@ -131,12 +142,26 @@ def generate_ai_question_batch(category, count=1):
         raw = extract_json_robustly(response.choices[0].message.content)
         res = []
         if isinstance(raw, list):
-            for item in raw:
-                q = sanitize_question(item, default_cat=category)
-                if q and "error" not in q: res.append(q)
+            items = raw
         elif isinstance(raw, dict):
-            q = sanitize_question(raw, default_cat=category)
-            if q and "error" not in q: res.append(q)
+            items = [raw]
+        else:
+            items = []
+            
+        for item in items:
+            q = sanitize_question(item, default_cat=category)
+            if q and "error" not in q:
+                # 乱码清洗与校验
+                q['question'] = clean_text(q.get('question', ''))
+                q['analysis'] = clean_text(q.get('analysis', ''))
+                if "\ufffd" in q['question'] or "\ufffd" in q['analysis']:
+                    continue # 若清洗后仍有乱码，报废
+                
+                kp = q.get('knowledge_point')
+                if kp:
+                    q['analysis'] += f"\n<!-- KP: {kp} -->"
+                    
+                res.append(q)
         return res
     except Exception as e:
         print(f"Batch generation error: {e}")
