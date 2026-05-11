@@ -199,8 +199,9 @@ def app_shell():
 def get_option_label(opts, key):
     val = opts.get(key) or opts.get(key.lower())
     if not val: return key
+    import re
     # Streamlit radio 不支持原生 HTML 标签，因此将 <u> 转换为 Markdown 加粗
-    val = str(val).replace("<u>", "**").replace("</u>", "**")
+    val = re.sub(r'<\/?u[^>]*>', '**', str(val), flags=re.IGNORECASE)
     return f"{key}. {val}"
 
 def render_selected_questions(is_admin):
@@ -491,8 +492,8 @@ def render_admin_lab():
         st.markdown(f"<div style='background-color:#f0fdf4; padding: 15px; border-radius: 8px; border-left: 5px solid #22c55e; margin-bottom: 15px;'><h3>{format_html(q_text)}</h3></div>", unsafe_allow_html=True)
         
         for k in ["A", "B", "C", "D"]:
-            v = opts.get(k) or opts.get(k.lower())
-            if v: st.write(f"**{k}.** {v}")
+            if opts.get(k) or opts.get(k.lower()):
+                st.markdown(get_option_label(opts, k))
                 
         st.success(f"✅ 正确答案：{q.get('answer')}")
         st.info(f"💡 解析：\n{format_analysis(q.get('analysis'))}")
