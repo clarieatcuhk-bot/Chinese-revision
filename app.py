@@ -304,17 +304,17 @@ def render_admin_lab():
         fetch_count = min(needed, 2) # 降低每次批量生成的数量（最大2题），防止 AI 接口超时卡顿
         st.toast(f"🚨 池子告急！AI 正在后台静默补货 {fetch_count} 题...")
         
-        def _refill(category, count):
+        def _refill(category, count, uid):
             try:
                 new_qs = generate_ai_question_batch(category, count)
                 for q in new_qs:
-                    share_to_community(q, f"DRAFT_{category}", "admin_system")
+                    share_to_community(q, f"DRAFT_{category}", uid)
             except: pass
             finally:
                 st.session_state.refill_lock = False
                 
         import threading
-        t = threading.Thread(target=_refill, args=(sel_cat, fetch_count), daemon=True)
+        t = threading.Thread(target=_refill, args=(sel_cat, fetch_count, st.session_state.user.id), daemon=True)
         try:
             from streamlit.runtime.scriptrunner import add_script_run_ctx
             add_script_run_ctx(t)
