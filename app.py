@@ -105,7 +105,9 @@ def start_global_daemon():
                 info.hit_rate = (info.total_discarded / info.total_generated) * 100
                 
             info.status = "休眠中 (等待下一轮扫描)"
-            info.last_run = time.strftime("%H:%M:%S")
+            import datetime
+            bj_tz = datetime.timezone(datetime.timedelta(hours=8))
+            info.last_run = datetime.datetime.now(bj_tz).strftime("%H:%M:%S")
             time.sleep(300)
             
     t = threading.Thread(target=_daemon, daemon=True)
