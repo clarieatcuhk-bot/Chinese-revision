@@ -12,9 +12,9 @@ from database import (
     get_user_all_logs, share_to_community, get_community_selected, 
     get_public_mistakes_with_kills, get_leaderboard_data, 
     clear_user_mistakes, delete_all_logs_of_question, delete_shared_question,
-    increment_challenge_stats, normalize_text
+    increment_challenge_stats, normalize_text, get_draft_pool, publish_draft
 )
-from ai_engine import generate_ai_question, evaluate_challenge
+from ai_engine import generate_ai_question, evaluate_challenge, generate_ai_question_batch
 
 # --- v10.12 极致移动端优化版 ---
 st.set_page_config(page_title="Zhongkao-Navigator Pro v10.12", page_icon="💎", layout="wide")
@@ -283,17 +283,49 @@ def render_personal_dashboard():
         else: st.success("干得漂亮！错题集目前是空的。")
 
 def render_admin_lab():
-    st.markdown("<div class='page-header'><h1>📖 命题实验室</h1><p>高质量出题机与题库调度中心</p></div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-header'><h1>📖 命题实验室</h1><p>工业级自动化刷题审核流水线</p></div>", unsafe_allow_html=True)
     
     cats = ["字音辨析", "成语运用", "病句诊断", "字形纠错", "3500字基础", "文学常识与传统文化"]
-    sel_cat = st.selectbox("🎯 选择本次命题的考点方向：", cats)
+    sel_cat = st.selectbox("🎯 选择审核流水线考点：", cats)
     
-    if st.button(f"✨ 立即生成一道【{sel_cat}】考题"):
-        with st.spinner("🧠 深层AI 命题网络运行中..."):
-            st.session_state.lab_q = generate_ai_question(None, "precise", sel_cat)
-            
-    if 'lab_q' in st.session_state and st.session_state.lab_q:
-        q = st.session_state.lab_q
+    # 动态补货算法 (Dynamic Refill)
+    if 'refill_lock' not in st.session_state: st.session_state.refill_lock = False
+    
+    drafts = get_draft_pool(sel_cat)
+    draft_count = len(drafts)
+    
+    c1, c2 = st.columns([3, 1])
+    c1.markdown(f"**当前【{sel_cat}】缓冲池余量: `{draft_count}` 题**")
+    if c2.button("🔄 刷新池子", use_container_width=True): st.rerun()
+    
+    if draft_count < 10 and not st.session_state.refill_lock:
+        st.session_state.refill_lock = True
+        needed = 3 * (10 - draft_count)
+        fetch_count = min(needed, 5) # 每次最多批量 5 题防超时
+        st.toast(f"🚨 池子告急！AI 正在后台静默补货 {fetch_count} 题...")
+        
+        def _refill(category, count):
+            try:
+                new_qs = generate_ai_question_batch(category, count)
+                for q in new_qs:
+                    share_to_community(q, f"DRAFT_{category}", "admin_system")
+            except: pass
+            finally:
+                st.session_state.refill_lock = False
+                
+        import threading
+        t = threading.Thread(target=_refill, args=(sel_cat, fetch_count), daemon=True)
+        try:
+            from streamlit.runtime.scriptrunner import add_script_run_ctx
+            add_script_run_ctx(t)
+        except: pass
+        t.start()
+        
+    st.divider()
+    
+    # 老师审核流水线 (Audit UI)
+    if drafts:
+        q = drafts[0]
         q_text = q.get('question', '')
         opts = ensure_dict(q.get('options', {}))
         
@@ -303,21 +335,23 @@ def render_admin_lab():
             v = opts.get(k) or opts.get(k.lower())
             if v: st.write(f"**{k}.** {v}")
                 
-        with st.expander("👀 查看答案与解析"):
-            st.success(f"正确答案：{q.get('answer')}")
-            st.info(f"解析：{q.get('analysis')}")
+        st.success(f"✅ 正确答案：{q.get('answer')}")
+        st.info(f"💡 解析：{q.get('analysis')}")
             
-        c1, c2 = st.columns(2)
-        if c1.button("🚀 确认发布"): 
-            share_to_community(q, q.get('category', sel_cat), st.session_state.user.id)
-            st.toast("✅ 题目已成功发布！")
-            time.sleep(1)
-            st.session_state.lab_q = None
+        col1, col2 = st.columns(2)
+        if col1.button("✅ 完美无瑕，通过并入库！", use_container_width=True): 
+            publish_draft(q['id'], sel_cat)
+            st.toast("入库成功！下一题已自动加载。")
+            time.sleep(0.3)
             st.rerun()
             
-        if c2.button("🗑️ 废弃此题"):
-            st.session_state.lab_q = None
+        if col2.button("🗑️ 逻辑不通，直接报废", use_container_width=True):
+            delete_shared_question(q['id'])
+            st.toast("已物理删除，下一题已加载。")
+            time.sleep(0.3)
             st.rerun()
+    else:
+        st.info("🕒 当前分类的缓冲池已空，AI 正在后台紧急加班出题中... 请稍候刷新！")
 
 def render_fast_training():
     st.markdown("<div class='page-header'><h1>⚡ 极速特训</h1><p>智能出题引擎，零延迟连刷体验</p></div>", unsafe_allow_html=True)

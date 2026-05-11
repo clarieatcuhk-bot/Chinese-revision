@@ -95,6 +95,53 @@ def generate_ai_question(items, mode, target_hint=None):
     except Exception as e:
         return {"error": str(e)}
 
+def generate_ai_question_batch(category, count=1):
+    client = get_ai_client()
+    if not client: return []
+    
+    prompt = f"""
+    Role: 国家级中考语文命题专家，拥有 20 年逻辑校验经验。
+    
+    Task: 批量生产 {count} 道【{category}】题目，存入“全站预生成池”。
+    
+    1. 逻辑锁定协议 (Crucial!):
+    前置校验: 在生成每道题的内容前，必须先在内部生成 logic_anchor（逻辑锚点）。
+    一致性检查: 强制检查：解析内容必须能唯一指向答案字母。若出现“答案为 A 但解析在讲 B”的情况，该题自动作废。
+    解析风格: 使用“手术刀紧缩法”，直击语病或字音的核心矛盾。
+    
+    2. 格式与素材约束:
+    HTML 支持: 考察字必须使用 <u></u> 标注。
+    数据源: 严格对应 chinese_assets.json（课内）或 chars_3500.json（全量）。
+    JSON 结构: 必须返回标准的 JSON 数组，数组中每个对象包含：
+    "category": "{category}", "question", "options" (A,B,C,D字典格式), "answer", "analysis", "logic_fingerprint"
+    
+    3. 幻觉屏蔽:
+    严禁出现模糊不清的干扰项。
+    干扰项的设置必须符合中考常考误区（如：介词掩盖主语、多音字误读）。
+    
+    请直接输出 JSON 数组，例如 [{{...}}, {{...}}]
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-v4-pro",
+            messages=[{"role": "system", "content": "必须返回合法的 JSON 数组格式。"}, {"role": "user", "content": prompt}],
+            temperature=0.3
+        )
+        raw = extract_json_robustly(response.choices[0].message.content)
+        res = []
+        if isinstance(raw, list):
+            for item in raw:
+                q = sanitize_question(item, default_cat=category)
+                if q and "error" not in q: res.append(q)
+        elif isinstance(raw, dict):
+            q = sanitize_question(raw, default_cat=category)
+            if q and "error" not in q: res.append(q)
+        return res
+    except Exception as e:
+        print(f"Batch generation error: {e}")
+        return []
+
 def evaluate_challenge(q, reason):
     client = get_ai_client()
     if not client: return False, "AI 服务未配置"

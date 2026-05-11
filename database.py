@@ -211,10 +211,24 @@ def get_community_selected(limit=100):
     supabase = get_supabase()
     try:
         res = supabase.table("shared_questions").select("*").order("recommend_count", desc=True).limit(limit).execute()
-        # 过滤乱码
-        valid = [q for q in (res.data or []) if q.get('question') and len(q.get('question')) > 5]
+        # 过滤乱码，并严格排除处于 DRAFT_ 状态的待审核题目
+        valid = [q for q in (res.data or []) if q.get('question') and len(q.get('question')) > 5 and not str(q.get('category')).startswith('DRAFT_')]
         return valid
     except: return []
+
+def get_draft_pool(category):
+    supabase = get_supabase()
+    try:
+        res = supabase.table("shared_questions").select("*").eq("category", f"DRAFT_{category}").execute()
+        return res.data or []
+    except: return []
+
+def publish_draft(q_id, original_category):
+    supabase = get_supabase()
+    try:
+        supabase.table("shared_questions").update({"category": original_category}).eq("id", q_id).execute()
+        return True
+    except: return False
 
 def get_user_all_logs(uid):
     supabase = get_supabase()
