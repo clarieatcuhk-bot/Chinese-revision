@@ -215,11 +215,35 @@ def render_selected_questions(is_admin):
     done_texts = {normalize_text(log.get('question', '')) for log in user_logs if log.get('question')}
     
     cats = ["字音", "字形", "病句", "成语"]
-    selected_cat = st.selectbox("📚 选择考点大类：", cats)
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        selected_cat = st.selectbox("📚 选择考点大类：", cats)
+    with c2:
+        st.write("")
+        st.write("")
+        if st.button("🔄 同步最新题库", use_container_width=True):
+            st.session_state.unattempted_queue = [q for q in qs if q.get('category', '综合') == selected_cat and normalize_text(q.get('question', '')) not in done_texts]
+            st.rerun()
+            
+    cat_qs = [q for q in qs if q.get('category', '综合') == selected_cat]
+    total_count = len(cat_qs)
+    done_list = [q for q in cat_qs if normalize_text(q.get('question', '')) in done_texts]
+    done_count = len(done_list)
+    
+    st.progress(done_count / total_count if total_count > 0 else 0.0)
+    st.caption(f"🎯 当前模块进度：已掌握 {done_count} 题 / 共 {total_count} 题")
+    
+    with st.expander("👀 查看已完成题目总览"):
+        if not done_list:
+            st.info("暂无已完成的题目")
+        else:
+            for idx, dq in enumerate(done_list):
+                st.markdown(f"**{idx+1}.** {format_html(dq.get('question'))}")
+    st.divider()
     
     # 构建 unattempted_list
     if 'unattempted_queue' not in st.session_state or st.session_state.get('last_sel_cat') != selected_cat:
-        st.session_state.unattempted_queue = [q for q in qs if q.get('category', '综合') == selected_cat and normalize_text(q.get('question', '')) not in done_texts]
+        st.session_state.unattempted_queue = [q for q in cat_qs if normalize_text(q.get('question', '')) not in done_texts]
         st.session_state.last_sel_cat = selected_cat
         st.session_state.last_question_review = None
         
