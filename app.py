@@ -169,6 +169,8 @@ def app_shell():
         menu = ["🌟 精选题库", "🚩 错题挑战", "⚡ 极速特训", "🏆 荣耀金榜", "📊 个人画像"]
         if is_admin: menu.insert(0, "📖 命题实验室")
         
+        active_tab = st.radio("系统频道", menu, key="nav_radio")
+        
         st.divider()
         if st.button("退出系统"): st.session_state.user = None; st.rerun()
 
