@@ -339,7 +339,7 @@ def render_mistake_stream(is_admin):
     st.markdown(f"<div style='background-color:#fffbeb; padding: 15px; border-radius: 8px; border-left: 5px solid #f59e0b; margin-bottom: 20px;'><h4 style='line-height:1.5;'>{format_html(q_text)}</h4></div>", unsafe_allow_html=True)
     
     ph_ans = st.empty()
-    ans = ph_ans.radio("重选答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key=f"redo_rad_{q.get('logic_fingerprint', random.random())}", index=None)
+    ans = ph_ans.radio("重选答案：", ["A", "B", "C", "D"], format_func=lambda x: get_option_label(opts, x), key=f"redo_rad_{q['id']}", index=None)
     st.write("")
     
     ph_btn = st.empty()
