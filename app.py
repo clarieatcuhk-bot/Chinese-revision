@@ -537,10 +537,13 @@ def render_admin_lab():
             
         col1, col2 = st.columns(2)
         if col1.button("✅ 完美无瑕，通过并入库！", use_container_width=True): 
-            publish_draft(q['id'], sel_cat, st.session_state.user.id)
-            st.toast("入库成功！下一题已自动加载。")
-            time.sleep(0.3)
-            st.rerun()
+            success, msg = publish_draft(q['id'], sel_cat, st.session_state.user.id)
+            if success:
+                st.toast("入库成功！下一题已自动加载。")
+                time.sleep(0.3)
+                st.rerun()
+            else:
+                st.error(f"入库失败: {msg}")
             
         if col2.button("🗑️ 逻辑不通，直接报废", use_container_width=True):
             delete_draft(q['id'])

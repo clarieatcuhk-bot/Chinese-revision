@@ -268,19 +268,28 @@ def publish_draft(draft_id, category, admin_id):
         if not res.data: return False
         q_data = res.data[0].get('content', {})
         
-        supabase.table("shared_questions").insert({
-            "category": category, 
-            "question": q_data.get("question", ""), 
-            "options": q_data.get("options", {}),
-            "answer": q_data.get("answer", ""), 
-            "analysis": q_data.get("analysis", ""), 
-            "user_id": admin_id, 
-            "recommend_count": 100
-        }).execute()
-        
-        supabase.table("draft_pool").delete().eq("id", draft_id).execute()
-        return True
-    except: return False
+        try:
+            supabase.table("shared_questions").insert({
+                "category": category, 
+                "question": q_data.get("question", ""), 
+                "options": q_data.get("options", {}),
+                "answer": q_data.get("answer", ""), 
+                "analysis": q_data.get("analysis", ""), 
+                "user_id": admin_id, 
+                "recommend_count": 100
+            }).execute()
+        except Exception as e:
+            if "duplicate key value violates unique constraint" in str(e) or "23505" in str(e):
+                pass # It's a duplicate, safely ignore and proceed to delete the draft
+            else:
+                raise e # Re-raise if it's a different error
+                
+        res = supabase.table("draft_pool").delete().eq("id", draft_id).execute()
+        return True, "Success"
+    except Exception as e: 
+        import traceback
+        traceback.print_exc()
+        return False, str(e)
 
 def delete_draft(draft_id):
     supabase = get_supabase()
