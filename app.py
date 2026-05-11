@@ -238,7 +238,7 @@ def render_selected_questions(is_admin):
             st.info("暂无已完成的题目")
         else:
             for idx, dq in enumerate(done_list):
-                st.markdown(f"**{idx+1}.** {format_html(dq.get('question'))}")
+                st.markdown(f"**{idx+1}.** {format_html(dq.get('question'))}", unsafe_allow_html=True)
     st.divider()
     
     # 构建 unattempted_list
