@@ -102,7 +102,7 @@ def start_global_daemon():
                 if x < 10:
                     info.status = f"正在为【{cat}】智能补货..."
                     needed = 3 * (10 - x)
-                    fetch_count = min(needed, 2)
+                    fetch_count = min(needed, 3)
                     
                     recent_kps = []
                     for d in drafts[:10]:
@@ -125,11 +125,18 @@ def start_global_daemon():
             if info.total_generated > 0:
                 info.hit_rate = (info.total_discarded / info.total_generated) * 100
                 
-            info.status = "休眠中 (等待下一轮扫描)"
             import datetime
             bj_tz = datetime.timezone(datetime.timedelta(hours=8))
             info.last_run = datetime.datetime.now(bj_tz).strftime("%H:%M:%S")
-            time.sleep(300)
+            
+            # 如果任何分类的库存不足 10，则缩短休眠时间以尽快补齐
+            needs_more = any(info.inventory.get(c, 0) < 10 for c in cats)
+            if needs_more:
+                info.status = "极速补货模式 (等待 10 秒后继续)"
+                time.sleep(10)
+            else:
+                info.status = "休眠中 (题库充足，等待下一轮扫描)"
+                time.sleep(300)
             
     t = threading.Thread(target=_daemon, daemon=True)
     try:
