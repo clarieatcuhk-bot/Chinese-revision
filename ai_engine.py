@@ -55,43 +55,42 @@ def generate_ai_question(items, mode, target_hint=None):
     prompt = f"""
     【目标考点】：{target_hint or '综合基础'}
     
-    Role: 顶级中考语文命题专家，拥有 20 年一线教学与阅卷经验。
-    Task: 生成高质量的中考语文练习题，严禁出现题干、选项、答案与解析互相冲突的情况。
+    Role: 国家级中考语文命题专家，擅长构建高逻辑一致性、零幻觉的大规模标准化题库。
+    Task: 在“命题实验室”架构下，通过“逻辑前置”模式，生成 1 道待审核的高质量题目。
     
-    1. 逻辑生成规程 (Strict Execution Order):
-    Step 1 - 考点提取: 锁定目标字符（参考 3500 字表）或常见课内考点。
-    Step 2 - 逻辑预设: 明确本题的“正确逻辑路径”。例如：本题考查“成分残缺”，正确选项必须主谓宾完整，错误选项必须缺失主语。
-    Step 3 - 选项隔离: 编写干扰项时，必须确保每个干扰项的错误类型是唯一的，且与正确答案有明显的边界。
-    Step 4 - 交叉校验: 生成解析后，必须自我检查：解析是否直接支持了正确答案？解析是否逐一驳回了错误选项？
+    1. 逻辑生成规程 (The Iron Logic):
+    - 逻辑指纹 (logic_fingerprint): 在生成每道题前，必须先在内部确定逻辑支点（如：本题考查“成分残缺”中的“介词掩盖主语”）。
+    - 自检闭环: 强制要求生成的 analysis（解析）必须能反向推导出唯一的 answer。若解析逻辑模糊，该题视为不合格。
+    - 注点规范: 题干中考察的加点字或重难点词必须使用 <u></u> 标签包裹。
     
-    2. 题目格式约束 (Strict JSON Schema):
-    请直接输出合法的 JSON 格式：
+    2. 混合动力源:
+    - 你的知识库应融合全国主流《中考语文考点大纲》与《初中生3500字表》。
+    
+    3. 容错与防幻觉指令:
+    - 严禁自相矛盾: 题干背景（如“研学活动”、“传统节日”）必须与语病或字词逻辑完美匹配。
+    - 严禁 Key 缺失: options 必须完整包含 A, B, C, D 键位。
+    
+    4. 题目格式约束 (Strict JSON Schema):
+    请直接输出单一合法的 JSON 对象（严禁输出为列表，严禁附加其他文本）：
     {{
-      "hidden_logic": "(必须) 在输出题目内容前，先简述本题的逻辑架构，确保 AI 自身大脑清醒",
-      "question": "(必须) 题干，加点字或重点词语必须使用 <u></u> 标注",
+      "category": "{target_hint or '综合基础'}",
+      "logic_fingerprint": "(必须) 简述本题的逻辑支点与考点",
+      "question": "(必须) 题干，含 <u></u>",
       "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
       "answer": "(必须) 只能是 'A', 'B', 'C', 'D' 之一",
-      "analysis": "(必须) 包含“手术刀紧缩法”解析，必须与答案严格对应",
-      "category": "{target_hint or '综合基础'}"
+      "analysis": "(必须) 手术刀紧缩法解析，必须与答案严格对应，自检闭环"
     }}
-    
-    3. 考点锁定 (Domain Specific):
-    - 病句类: 严格限定在六类语病（语序不当、搭配不当、成分残缺、结构混乱、表意不明、不合逻辑）。
-    - 字音字形: 必须参考 3500 字表的标准读音，严禁生造读音。
-    
-    4. 幻觉屏蔽原则:
-    - 严禁在解析中出现“虽然...但是...”等模棱两可的废话。
-    - 严禁出现“以上选项均不正确”等无效干扰。
-    - 双重确认: 你的答案字母必须与解析内容 100% 匹配。
     """
 
     try:
         response = client.chat.completions.create(
             model="deepseek-v4-pro",
-            messages=[{"role": "system", "content": "你是顶级中考语文命题专家，请严格遵循规程并输出合法的 JSON。"}, {"role": "user", "content": prompt}],
-            temperature=0.3
+            messages=[{"role": "system", "content": "你是国家级中考语文命题专家，请严格遵循逻辑闭环并输出合法的单一 JSON 对象。"}, {"role": "user", "content": prompt}],
+            temperature=0.25
         )
         raw = extract_json_robustly(response.choices[0].message.content)
+        # 兼容处理如果是列表的情况
+        if isinstance(raw, list) and len(raw) > 0: raw = raw[0]
         return sanitize_question(raw, default_cat=target_hint or "综合")
     except Exception as e:
         return {"error": str(e)}
