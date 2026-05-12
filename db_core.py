@@ -216,82 +216,55 @@ def get_community_selected(limit=1000):
         return valid
     except: return []
 
-def add_to_draft_pool(q_data):
+def get_draft_pool(category=None):
     supabase = get_supabase()
     try:
-        supabase.table("draft_pool").insert({
-            "category": q_data.get("category"),
-            "content": q_data,
-            "logic_fingerprint": q_data.get("logic_fingerprint", ""),
-            "knowledge_point": q_data.get("knowledge_point", "")
-        }).execute()
-        return True
-    except: return False
-
-def clean_draft_pool_data():
-    supabase = get_supabase()
-    try:
-        res = supabase.table("draft_pool").select("*").execute()
-        from ai_engine import get_clean_category
-        for row in (res.data or []):
-            content = row.get("content", {})
-            full_text = content.get("question", "") + " " + content.get("analysis", "")
-            raw_cat = row.get("category", "")
-            
-            clean = get_clean_category(raw_cat, full_text)
-            if clean != raw_cat:
-                content["category"] = clean
-                supabase.table("draft_pool").update({
-                    "category": clean,
-                    "content": content
-                }).eq("id", row["id"]).execute()
-    except Exception as e:
-        print(f"Hot wash error: {e}")
-
-def get_draft_pool(category):
-    supabase = get_supabase()
-    try:
-        res = supabase.table("draft_pool").select("*").eq("category", category).execute()
-        if not res.data: return []
+        q = supabase.table("shared_questions").select("*").like("category", "DRAFT_%").order("created_at", desc=False)
+        if category: q = q.eq("category", f"DRAFT_{category}")
+        res = q.execute()
+        
         ret = []
-        for r in res.data:
-            q = r.get('content', {})
-            q['id'] = r.get('id')
-            ret.append(q)
+        for r in (res.data or []):
+            ret.append({
+                "id": r["id"],
+                "category": str(r["category"]).replace("DRAFT_", ""),
+                "question": r.get("question", ""),
+                "options": r.get("options", {}),
+                "answer": r.get("answer", ""),
+                "analysis": r.get("analysis", "")
+            })
         return ret
     except: return []
 
 def publish_draft(draft_id, category, admin_id):
     supabase = get_supabase()
     try:
-        res = supabase.table("draft_pool").select("*").eq("id", draft_id).execute()
-        if not res.data: return False
-        q_data = res.data[0].get('content', {})
+        res = supabase.table("shared_questions").select("*").eq("id", draft_id).execute()
+        if not res.data: return False, "Draft not found"
+        q_data = res.data[0]
         
         msg = "Success"
         try:
             q_text = q_data.get("question", "")
-            # Appending an invisible HTML comment ensures uniqueness to bypass the flawed UNIQUE constraint on the question column
             if "<!--" not in q_text:
                 q_text += f" <!-- {draft_id} -->"
                 
-            supabase.table("shared_questions").insert({
-                "category": category, 
-                "question": q_text, 
-                "options": q_data.get("options", {}),
-                "answer": q_data.get("answer", ""), 
-                "analysis": q_data.get("analysis", ""), 
-                "user_id": admin_id, 
-                "recommend_count": 100
-            }).execute()
+            # 我们不再是从 draft_pool 移动到 shared_questions
+            # 而是直接 UPDATE 它的 category 移除 DRAFT_ 前缀，并更新时间戳
+            supabase.table("shared_questions").update({
+                "category": category,
+                "question": q_text,
+                "user_id": admin_id,
+                "recommend_count": 100,
+                "created_at": "now()"
+            }).eq("id", draft_id).execute()
         except Exception as e:
             if "duplicate key value violates unique constraint" in str(e) or "23505" in str(e):
                 print(f"DUPLICATE DETECTED: {e}")
                 msg = "Duplicate"
             else:
-                raise e # Re-raise if it's a different error
+                return False, f"Update failed: {str(e)}"
                 
-        res = supabase.table("draft_pool").delete().eq("id", draft_id).execute()
         return True, msg
     except Exception as e: 
         import traceback
@@ -301,9 +274,39 @@ def publish_draft(draft_id, category, admin_id):
 def delete_draft(draft_id):
     supabase = get_supabase()
     try:
-        supabase.table("draft_pool").delete().eq("id", draft_id).execute()
+        supabase.table("shared_questions").delete().eq("id", draft_id).execute()
         return True
     except: return False
+
+def add_to_draft_pool(q_data):
+    supabase = get_supabase()
+    try:
+        res = supabase.table("answer_logs").select("user_id").limit(1).execute()
+        valid_uid = res.data[0]["user_id"] if res.data else "00000000-0000-0000-0000-000000000000"
+        
+        analysis = q_data.get("analysis", "")
+        kp = q_data.get("knowledge_point", "")
+        if kp and f"<!-- KP: {kp} -->" not in analysis:
+            analysis += f"\n<!-- KP: {kp} -->"
+            
+        supabase.table("shared_questions").insert({
+            "category": f"DRAFT_{q_data.get('category')}",
+            "question": q_data.get("question", ""),
+            "options": q_data.get("options", {}),
+            "answer": q_data.get("answer", ""),
+            "analysis": analysis,
+            "user_id": valid_uid,
+            "recommend_count": 0
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"Draft Insert Error: {e}")
+        return False
+
+def clean_draft_pool_data():
+    pass # 移除此逻辑，不再需要热洗 DRAFT_ 状态的数据
+
+
 
 def get_admin_uuid():
     supabase = get_supabase()
